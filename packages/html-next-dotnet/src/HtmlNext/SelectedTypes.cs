@@ -2,13 +2,22 @@ using AngleSharp.Dom;
 
 namespace HtmlNext;
 
-internal sealed record SelectedTypeOption(ExpressionValue Value, ValueType Type);
+internal sealed record SelectedTypeOption(ExpressionValue Value, ValueType Type)
+{
+    public ValueType ReferenceType { get; } = Type.AsReference();
+}
 
 internal sealed class SelectedType(string from, bool state, SelectedTypeOption[] options, ValueType? defaultType)
 {
     private BoundPath selector = null!;
     public bool FromState { get; } = state;
     public ValueType? DefaultType { get; } = defaultType;
+    internal string? FormattingKind { get; } = CommonFormattingKind(options);
+    private static string? CommonFormattingKind(SelectedTypeOption[] options)
+    {
+        var kind = options.Length == 0 ? null : FormattingExpression.InputKind(options[0].Type);
+        return options.All(option => FormattingExpression.InputKind(option.Type) == kind) ? kind : null;
+    }
     public int PreparationSlot { get; private set; } = -1;
     public void Link(IReadOnlyDictionary<string, (int Slot, ValueType Type)> bindings, LocalDeclaration? declaration, int preparationSlot)
     {
@@ -17,10 +26,13 @@ internal sealed class SelectedType(string from, bool state, SelectedTypeOption[]
         PreparationSlot = preparationSlot;
     }
     public string From { get; } = from;
-    public ValueType? Read(object?[] values)
+    private static readonly ValueType NoSelection = ExpressionValue.NullType.AsReference();
+    public ValueType? Read(object?[] values) => Option(values)?.Type;
+    public ValueType ReferenceType(object?[] values) => Option(values)?.ReferenceType ?? NoSelection;
+    private SelectedTypeOption? Option(object?[] values)
     {
         var value = ExpressionValue.StoredValue(selector.Read(values), selector.Type);
-        foreach (var option in options) if (Same(option.Value, value)) return option.Type;
+        foreach (var option in options) if (Same(option.Value, value)) return option;
         return null;
     }
     internal static bool Same(ExpressionValue left, ExpressionValue right) => left.IsNumeric && right.IsNumeric ? left.Number == right.Number

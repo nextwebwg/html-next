@@ -48,4 +48,14 @@ public sealed class SelectedTypeTests
         Assert.Equal("<output>3:false</output>", template.Render(new { mode = "text", value = "3" }));
         Assert.Equal("<output>3:true</output>", template.Render(new { mode = "number", value = 3 }));
     }
+
+    [Fact]
+    public void LiteralNullRestoresAStructuredDefaultWithoutATypeDiagnostic()
+    {
+        var fixture = Cases().Select(item => (JsonElement)item[1]).Single(item => item.GetProperty("name").GetString() == "selected structured literal null resets its default");
+        var template = HtmlNextCompiler.CompileResource(fixture.GetProperty("source").GetString()!).Template("x-page");
+        var diagnostics = new List<HtmlNextDiagnostic>();
+        template.Render(onDiagnostic: diagnostics.Add);
+        Assert.Empty(diagnostics);
+    }
 }

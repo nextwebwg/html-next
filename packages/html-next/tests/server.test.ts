@@ -22,6 +22,42 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
+  it("omits authored comments from rendered content and slot fallbacks", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const supplied of [false, true]) {
+        const definitions = [
+          parseComponent('<template component="x-card"><article>Before<!-- authored-note -->After<slot>Fall<!-- fallback-note -->back</slot></article></template>'),
+          parseComponent(`<template component="x-parent"><main><x-card>${supplied ? "Given<!-- projected-note -->Text" : ""}</x-card></main></template>`),
+        ];
+        const { html } = await renderer.render('<x-parent></x-parent>', { definitions });
+        const dom = new JSDOM(html);
+        try {
+          assert.ok(!html.includes("-note"));
+          assert.equal(dom.window.document.querySelector("article")!.textContent, "BeforeAfter" + (supplied ? "GivenText" : "Fallback"));
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("records parent-bound props as caller-provided rather than module-produced", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const expression of ["$name", "$draft", "null"]) {
+        const definitions = [
+          parseComponent('<template component="x-card"><defs><prop name="title" type="string" default="Default">Title.</prop></defs><article><input from:value="$title"></article></template>'),
+          parseComponent(`<template component="x-parent"><defs><prop name="name" type="string" default="Provided">Name.</prop><state name="draft" type="string" from="$name"></state></defs><main><x-card from:title="${expression}"></x-card></main></template>`),
+        ];
+        const { html } = await renderer.render('<x-parent></x-parent>', { definitions });
+        const dom = new JSDOM(html);
+        try {
+          const record = renderedInstanceRecord(dom.window.document.querySelector("article")!, "x-card")!;
+          assert.equal(record.props.title, expression === "null" ? "Default" : "Provided");
+          assert.equal(record.inputs.title!.provided, true);
+          assert.equal(record.inputs.title!.producer ?? false, false);
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
   it("discovers a large registered component catalog without a combined selector limit", async () => {
     const definitions = Array.from({ length: 60 }, (_, index) => {
       const tag = `x-long-component-name-for-discovery-${index}`;
@@ -331,6 +367,114 @@ describe("Node component rendering", () => {
     await assert.rejects(renderComponents('<x-initial-props></x-initial-props>', { definitions: [definition], props: { "#missing": { label: "No" } } }), /matches no component/);
     await assert.rejects(renderComponents('<div id="plain"></div>', { definitions: [definition], props: { "#plain": { label: "No" } } }), /does not identify a component/);
     await assert.rejects(renderComponents('<x-initial-props id="wrong"></x-initial-props>', { definitions: [definition], props: { "#wrong": { unknown: true } } }), /declares no prop/);
+  });
+  it("keeps receiving defaults ready when an available object has no bound member", async () => {
+    const definitions = [parseComponent(`<template component="x-default-child"><defs>
+      <prop name="title" type="string" default="Fallback">Title.</prop>
+      <state name="draft" type="string" from="$title"></state>
+      <computed name="blank" from="$title = ''"></computed>
+      </defs><article from:aria-hidden="$blank"><output>{$draft}</output></article></template>`),
+    parseComponent(`<template component="x-default-parent"><defs><prop name="data" type="object" open>Data.</prop></defs>
+      <main><x-default-child from:title="$data.title"></x-default-child></main></template>`)];
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const [data, expected] of [[{}, "Fallback"], [{ title: null }, "Fallback"],
+        [{ title: "" }, ""], [{ title: "Provided" }, "Provided"]] as const) {
+        const { html } = await renderer.render('<x-default-parent></x-default-parent>', {
+          definitions, props: { "x-default-parent": { data } },
+        });
+        const dom = new JSDOM(html);
+        try {
+          const root = dom.window.document.querySelector("article")!;
+          assert.equal(root.querySelector("output")!.textContent, expected);
+          assert.equal(root.getAttribute("aria-hidden"), String(expected.length === 0));
+          const record = renderedInstanceRecord(root, "x-default-child")!;
+          assert.deepEqual(record.initialized, ["draft"]);
+          assert.equal(record.availability?.title?.ready ?? true, true);
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("records explicit prop metadata without turning omitted or null defaults into inputs", async () => {
+    const definitions = [parseComponent(`<template component="x-reflect"><defs>
+      <prop name="count" type="integer" default="5">Count.</prop><prop name="pageSize" type="integer" default="10">Size.</prop>
+      <prop name="enabled" type="boolean" default="true">Enabled.</prop><prop name="rows" type="list(string)" default="[]">Rows.</prop>
+      </defs><article><output>{$count}:{$pageSize}:{$enabled}:{$rows.length}</output></article></template>`),
+    parseComponent('<template component="x-wrap"><defs><prop name="count" type="integer" default="5">Count.</prop></defs><x-reflect from:count="$count"></x-reflect></template>')];
+    const cases: Array<[string, Record<string, unknown>, Record<string, string>]> = [
+      ["x-reflect", {}, {}], ["x-reflect", { count: null }, {}],
+      ["x-reflect", { count: 7, pageSize: 12 }, { "data-x-reflect-prop-count": "7", "data-x-reflect-prop-page-size": "12" }],
+      ["x-reflect", { enabled: false }, { "data-x-reflect-prop-enabled": "false" }],
+      ["x-reflect", { rows: [] }, { "data-x-reflect-prop-rows": "[]" }],
+      ["x-reflect", { rows: ["A", "B"] }, { "data-x-reflect-prop-rows": '["A","B"]' }],
+      ["x-reflect", { count: "wrong" }, { "data-x-reflect-prop-count": "5" }],
+      ["x-wrap", {}, { "data-x-reflect-prop-count": "5" }],
+      ["x-wrap", { count: 9 }, { "data-x-wrap-prop-count": "9", "data-x-reflect-prop-count": "9" }],
+      ["x-wrap", { count: null }, { "data-x-reflect-prop-count": "5" }],
+    ];
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const [tag, inputs, expected] of cases) {
+        const { html } = await renderer.render(`<${tag}></${tag}>`, { definitions, props: { [tag]: inputs } });
+        const dom = new JSDOM(html);
+        try {
+          const root = dom.window.document.querySelector("article")!;
+          assert.deepEqual(Object.fromEntries([...root.attributes].filter(attribute => attribute.name.includes("-prop-")).map(attribute => [attribute.name, attribute.value])), expected);
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("preserves an initial textarea newline through the serialized HTML parser boundary", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const property of [false, true]) for (const value of ["\nLeading", "\r\nLeading"]) {
+        const definition = parseComponent(`<template component="x-area"><defs><prop name="value" type="string">Value.</prop></defs><textarea${property ? ' .value="$value"' : ""}>${property ? "Authored" : "{$value}"}</textarea></template>`);
+        const { html } = await renderer.render("<x-area></x-area>", { definitions: [definition], props: { "x-area": { value } } });
+        const dom = new JSDOM(html);
+        try {
+          const area = dom.window.document.querySelector("textarea")!;
+          assert.equal(area.value, "\nLeading");
+          if (property) assert.deepEqual(JSON.parse(area.getAttribute("data-html-next-form-defaults")!), { value: "Authored" });
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("serializes initial value properties with their authored reset defaults", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const [expression, expected] of [["'Live'", "Live"], ["null", ""], ["false", "false"], ["17", "17"], ["[]", ""], ["[1, 2]", "1,2"], ["{}", "[object Object]"]]) {
+        const definition = parseComponent(`<template component="x-field"><input value="Base" .value="${expression}"></template>`);
+        const { html } = await renderer.render("<x-field></x-field>", { definitions: [definition] });
+        const dom = new JSDOM(html);
+        try {
+          const input = dom.window.document.querySelector("input")!;
+          assert.equal(input.value, expected);
+          assert.deepEqual(JSON.parse(input.getAttribute("data-html-next-form-defaults")!), { value: "Base", valuePresent: true });
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("serializes checked properties separately from authored form reset defaults", async () => {
+    const cases = [["true", false, true], ["false", false, false], ["true", true, true], ["false", true, false],
+      ["null", true, false], ["''", true, false], ["0", true, false], ["'false'", false, true],
+      ["[]", false, true], ["{}", false, true], ["1 / 0", true, true], ["1 / 0", false, false]] as const;
+    const definition = parseComponent(`<template component="x-checked-properties"><form>${cases.map(([expression, authored], index) =>
+      `<input id="case-${index}" type="checkbox" value="control"${authored ? ' checked="authored"' : ''} .checked="${expression}">`).join("")}</form></template>`);
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      const { html } = await renderer.render('<x-checked-properties></x-checked-properties>', { definitions: [definition] });
+      const dom = new JSDOM(html);
+      try {
+        cases.forEach(([, authored, expected], index) => {
+          const input = dom.window.document.querySelector<HTMLInputElement>(`#case-${index}`)!;
+          assert.equal(input.hasAttribute(".checked"), false);
+          assert.equal(input.checked, expected);
+          const defaults = input.getAttribute("data-html-next-form-defaults");
+          if (authored !== expected) assert.equal(JSON.parse(defaults!).checked, authored);
+          else assert.equal(defaults, null);
+        });
+      } finally { dom.window.close(); }
+    } finally { await renderer.close(); }
   });
   it("renders braced inline expressions as escaped text in mixed content and native table rows", async () => {
     const definition = parseComponent(String.raw`<template component="x-inline"><defs>

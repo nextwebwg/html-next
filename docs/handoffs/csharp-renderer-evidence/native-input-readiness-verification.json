@@ -1,0 +1,167 @@
+{
+  "base": "2dba1c4c",
+  "sourceHashes": {
+    "CHANGELOG.md": "117f6b389bea8714a47725c323f3d65bb2552f953277e16a94064a19145f092c",
+    "packages/html-next-dotnet/README.md": "e04ccbf3dfc007b21e905b9a75d249a09b3bf3f96de5bfc2cf5cc26f1a7fb47d",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "336745efeff66b10c201c23a741728368ef3e4ca2d85472d4210b94a4029c3bb",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentCall.cs": "d2fb931326ca0d80b734057d43c6a3f031ea9c39c07214d90eb7397ec32e61e8",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "a327ee73ac0fc46571aed5249c0566275b8ae2b2c1498253940c3db9a1666c86",
+    "packages/html-next-dotnet/src/HtmlNext/HydrationRecords.cs": "fb6beb4b07d26eee2b159d50759febc7cf62325b30d890813fd10401af20ce95",
+    "packages/html-next-dotnet/src/HtmlNext/ModulePreparation.cs": "2ef467ec330857fd6513e07aab103a5c57da2101c26449a48c4d67532e6e49f2",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/ConstraintTests.cs": "e8fabf86ad5acf6c60a6107d2fecfdf0c3c77559f461e88d31a03327a806c2ce",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HydrationRecordTests.cs": "fb5910ba8a9ecf14cd069e1296c5551f9be031f3d169732e4aef11f0c00ebdf3",
+    "packages/html-next-unplugin/tests/dotnet-hydration.test.ts": "a8afac0670a397fe290410fcf243c9d5b4c6e6d582f0ac5144786ae01aebf787"
+  },
+  "scope": "Native common prop readiness, one-time state ownership and browser adoption, including nested bindings and accepted literal fallback.",
+  "proof": {
+    "rootBefore": "Omitted/refused inputs claimed draft; two new native cases and the first later browser update failed.",
+    "nestedBefore": "Three new native cases and the nested browser update failed because an unresolved source was treated as available.",
+    "literalBefore": "A valid literal fallback rendered but remained unavailable; its independent native regression failed.",
+    "reviewBefore": "Two public Validate cases threw IndexOutOfRangeException because rendering scope creation indexed the short validation array.",
+    "nativeAfter": {
+      "passed": 958,
+      "skipped": 0
+    },
+    "nodeOracle": {
+      "scope": "Native versus actual Node props, state, initialized seed ownership and availability. Input source/caller metadata beyond the literal-fallback case is not claimed identical.",
+      "cases": [
+        {
+          "source": "common-input-readiness-qualified",
+          "case": "omitted",
+          "equal": true
+        },
+        {
+          "source": "common-input-readiness-qualified",
+          "case": "explicit-null",
+          "equal": true
+        },
+        {
+          "source": "common-input-readiness-qualified",
+          "case": "supplied",
+          "equal": true
+        },
+        {
+          "source": "common-input-readiness-qualified",
+          "case": "invalid",
+          "equal": true
+        },
+        {
+          "source": "common-input-readiness-qualified",
+          "case": "empty-default",
+          "equal": true
+        },
+        {
+          "source": "common-input-readiness-qualified",
+          "case": "invalid-default",
+          "equal": true
+        },
+        {
+          "source": "nested-input-readiness-qualified",
+          "case": "omitted",
+          "equal": true
+        },
+        {
+          "source": "nested-input-readiness-qualified",
+          "case": "explicit-null",
+          "equal": true
+        },
+        {
+          "source": "nested-input-readiness-qualified",
+          "case": "supplied",
+          "equal": true
+        },
+        {
+          "source": "nested-input-readiness-qualified",
+          "case": "invalid",
+          "equal": true
+        },
+        {
+          "source": "nested-input-readiness-qualified",
+          "case": "empty-default",
+          "equal": true
+        },
+        {
+          "source": "nested-input-readiness-qualified",
+          "case": "invalid-default",
+          "equal": true
+        },
+        {
+          "source": "literal-fallback-readiness-qualified",
+          "case": "literal-fallback",
+          "equal": true
+        }
+      ],
+      "passed": 13,
+      "failed": 0,
+      "timing": "Root/nested observations precede the final validation-only guard. Literal fallback observation follows it. Final native and browser suites qualify current rendering behavior.",
+      "literalInput": "The accepted literal HTML value, source, present and provided ownership match; native also emits producer:false."
+    },
+    "browser": {
+      "passed": 23,
+      "skipped": 0,
+      "seconds": 24.37,
+      "engines": [
+        "Chromium local",
+        "Firefox pinned Playwright Linux container",
+        "WebKit local"
+      ]
+    }
+  },
+  "verification": {
+    "verifyPr": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "javascript": {
+        "passed": 2116,
+        "explicitlyGatedSkips": 5026,
+        "seconds": 328.27
+      },
+      "native": {
+        "passed": 958,
+        "skipped": 0
+      },
+      "fluidFullOutputValidations": 5,
+      "nativeClientIntegration": {
+        "passed": 11,
+        "browserGatedSkips": 12,
+        "seconds": 11.79
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "skipped": 0,
+        "seconds": 89.1
+      }
+    }
+  },
+  "review": {
+    "method": "One bounded CE lite inline correctness pass and five-rubric simplification; no reviewer agents or cross-model review.",
+    "confirmedFindings": 1,
+    "fixedFindings": 1,
+    "finding": "Validate short-array regression, fixed with two red/green cases.",
+    "proofTestsPreserved": true
+  },
+  "allocationObserver": {
+    "fullOutputsValidated": 5,
+    "workloads": [
+      "card",
+      "list-10",
+      "list-100",
+      "list-1000",
+      "cart-100"
+    ],
+    "nativeBytes": [
+      240,
+      1984,
+      19264,
+      195664,
+      19072
+    ],
+    "change": "Unchanged from the prior observer checkpoint.",
+    "limits": "Current-thread allocated bytes only. No latency, retained/peak-memory or serving claim."
+  },
+  "limits": [
+    "Pending/error/stale and richer async/state/context preparation remain unfinished.",
+    "Broader scoped/prepared accepted-child behavior and the complete real Looma catalog are not qualified by this increment.",
+    "The full native goal and package publication remain unfinished."
+  ]
+}

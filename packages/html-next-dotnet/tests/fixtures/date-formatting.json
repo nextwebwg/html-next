@@ -1,0 +1,2082 @@
+[
+  {
+    "name": "date instant default",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "date",
+    "options": {
+      "timeZone": "UTC"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024"
+  },
+  {
+    "name": "date full",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "date",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "full"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Thursday, February 29, 2024"
+  },
+  {
+    "name": "date long",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "date",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "February 29, 2024"
+  },
+  {
+    "name": "date medium",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "date",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "medium"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024"
+  },
+  {
+    "name": "date short",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "date",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2/29/24"
+  },
+  {
+    "name": "time instant default",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "UTC"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:34:56 PM"
+  },
+  {
+    "name": "time full",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "UTC",
+      "timeStyle": "full"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:34:56 PM Coordinated Universal Time"
+  },
+  {
+    "name": "time long",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "UTC",
+      "timeStyle": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:34:56 PM UTC"
+  },
+  {
+    "name": "time medium",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "UTC",
+      "timeStyle": "medium"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:34:56 PM"
+  },
+  {
+    "name": "time short",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "UTC",
+      "timeStyle": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:34 PM"
+  },
+  {
+    "name": "dateTime instant default",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56 PM"
+    }
+  },
+  {
+    "name": "dateTime full",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "full",
+      "timeStyle": "full"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Thursday, February 29, 2024 at 12:34:56 PM Coordinated Universal Time"
+  },
+  {
+    "name": "dateTime long",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "long",
+      "timeStyle": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "February 29, 2024 at 12:34:56 PM UTC"
+  },
+  {
+    "name": "dateTime medium",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "medium",
+      "timeStyle": "medium"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56 PM"
+    }
+  },
+  {
+    "name": "dateTime short",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "short",
+      "timeStyle": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2/29/24, 12:34 PM"
+  },
+  {
+    "name": "inferred date",
+    "value": "2024-02-29",
+    "inputType": "date",
+    "formatter": null,
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024"
+  },
+  {
+    "name": "parts date",
+    "value": "2024-02-29",
+    "inputType": "date",
+    "formatter": null,
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "month",
+        "value": "Feb"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "day",
+        "value": "29"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "year",
+        "value": "2024"
+      }
+    ]
+  },
+  {
+    "name": "inferred time",
+    "value": "12:34:56.789",
+    "inputType": "time",
+    "formatter": null,
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:34:56 PM"
+  },
+  {
+    "name": "parts time",
+    "value": "12:34:56.789",
+    "inputType": "time",
+    "formatter": null,
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "hour",
+        "value": "12"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "minute",
+        "value": "34"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "second",
+        "value": "56"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "dayPeriod",
+        "value": "PM"
+      }
+    ]
+  },
+  {
+    "name": "inferred datetime-local",
+    "value": "2024-02-29T12:34:56.789",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56 PM"
+    }
+  },
+  {
+    "name": "parts datetime-local",
+    "value": "2024-02-29T12:34:56.789",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "month",
+        "value": "Feb"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "day",
+        "value": "29"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "year",
+        "value": "2024"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "hour",
+        "value": "12"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "minute",
+        "value": "34"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "second",
+        "value": "56"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "dayPeriod",
+        "value": "PM"
+      }
+    ],
+    "platformExpected": {
+      "macos-icu-78.1": [
+        {
+          "type": "month",
+          "value": "Feb"
+        },
+        {
+          "type": "literal",
+          "value": " "
+        },
+        {
+          "type": "day",
+          "value": "29"
+        },
+        {
+          "type": "literal",
+          "value": ", "
+        },
+        {
+          "type": "year",
+          "value": "2024"
+        },
+        {
+          "type": "literal",
+          "value": " at "
+        },
+        {
+          "type": "hour",
+          "value": "12"
+        },
+        {
+          "type": "literal",
+          "value": ":"
+        },
+        {
+          "type": "minute",
+          "value": "34"
+        },
+        {
+          "type": "literal",
+          "value": ":"
+        },
+        {
+          "type": "second",
+          "value": "56"
+        },
+        {
+          "type": "literal",
+          "value": " "
+        },
+        {
+          "type": "dayPeriod",
+          "value": "PM"
+        }
+      ]
+    }
+  },
+  {
+    "name": "inferred datetime",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "datetime",
+    "formatter": null,
+    "options": {
+      "timeZone": "UTC"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56 PM"
+    }
+  },
+  {
+    "name": "parts datetime",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "datetime",
+    "formatter": null,
+    "options": {
+      "timeZone": "UTC"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "month",
+        "value": "Feb"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "day",
+        "value": "29"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "year",
+        "value": "2024"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "hour",
+        "value": "12"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "minute",
+        "value": "34"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "second",
+        "value": "56"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "dayPeriod",
+        "value": "PM"
+      }
+    ],
+    "platformExpected": {
+      "macos-icu-78.1": [
+        {
+          "type": "month",
+          "value": "Feb"
+        },
+        {
+          "type": "literal",
+          "value": " "
+        },
+        {
+          "type": "day",
+          "value": "29"
+        },
+        {
+          "type": "literal",
+          "value": ", "
+        },
+        {
+          "type": "year",
+          "value": "2024"
+        },
+        {
+          "type": "literal",
+          "value": " at "
+        },
+        {
+          "type": "hour",
+          "value": "12"
+        },
+        {
+          "type": "literal",
+          "value": ":"
+        },
+        {
+          "type": "minute",
+          "value": "34"
+        },
+        {
+          "type": "literal",
+          "value": ":"
+        },
+        {
+          "type": "second",
+          "value": "56"
+        },
+        {
+          "type": "literal",
+          "value": " "
+        },
+        {
+          "type": "dayPeriod",
+          "value": "PM"
+        }
+      ]
+    }
+  },
+  {
+    "name": "locale de-DE",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {
+      "dateStyle": "long"
+    },
+    "locale": "de-DE",
+    "operation": "format",
+    "expected": "29. Februar 2024"
+  },
+  {
+    "name": "locale fr-CA",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {
+      "dateStyle": "long"
+    },
+    "locale": "fr-CA",
+    "operation": "format",
+    "expected": "29 février 2024"
+  },
+  {
+    "name": "locale ja-JP",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {
+      "dateStyle": "long"
+    },
+    "locale": "ja-JP",
+    "operation": "format",
+    "expected": "2024年2月29日"
+  },
+  {
+    "name": "locale ar-EG",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {
+      "dateStyle": "long"
+    },
+    "locale": "ar-EG",
+    "operation": "format",
+    "expected": "٢٩ فبراير ٢٠٢٤",
+    "platformExpected": {
+      "macos-icu-78.1": "٢٩ فبراير، ٢٠٢٤"
+    }
+  },
+  {
+    "name": "locale en-US-u-ca-buddhist",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {
+      "dateStyle": "long"
+    },
+    "locale": "en-US-u-ca-buddhist",
+    "operation": "format",
+    "expected": "February 29, 2567 BE"
+  },
+  {
+    "name": "locale en-US-u-nu-arab",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {
+      "dateStyle": "long"
+    },
+    "locale": "en-US-u-nu-arab",
+    "operation": "format",
+    "expected": "February ٢٩, ٢٠٢٤"
+  },
+  {
+    "name": "zone UTC",
+    "value": "2024-02-29T12:34:56Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56 PM"
+    }
+  },
+  {
+    "name": "zone America/Los_Angeles",
+    "value": "2024-02-29T12:34:56Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "America/Los_Angeles"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 4:34:56 AM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 4:34:56 AM"
+    }
+  },
+  {
+    "name": "zone Asia/Kolkata",
+    "value": "2024-02-29T12:34:56Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "Asia/Kolkata"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 6:04:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 6:04:56 PM"
+    }
+  },
+  {
+    "name": "zone +05:30",
+    "value": "2024-02-29T12:34:56Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "+05:30"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 6:04:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 6:04:56 PM"
+    }
+  },
+  {
+    "name": "zone -0800",
+    "value": "2024-02-29T12:34:56Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "-0800"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 4:34:56 AM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 4:34:56 AM"
+    }
+  },
+  {
+    "name": "zone not-a-zone",
+    "value": "2024-02-29T12:34:56Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "not-a-zone"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "cycle h11 00:05",
+    "value": "00:05",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "hour": "2-digit",
+      "minute": "2-digit",
+      "hourCycle": "h11"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "00:05 AM"
+  },
+  {
+    "name": "cycle h11 13:05",
+    "value": "13:05",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "hour": "2-digit",
+      "minute": "2-digit",
+      "hourCycle": "h11"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "01:05 PM"
+  },
+  {
+    "name": "cycle h12 00:05",
+    "value": "00:05",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "hour": "2-digit",
+      "minute": "2-digit",
+      "hourCycle": "h12"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:05 AM"
+  },
+  {
+    "name": "cycle h12 13:05",
+    "value": "13:05",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "hour": "2-digit",
+      "minute": "2-digit",
+      "hourCycle": "h12"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "01:05 PM"
+  },
+  {
+    "name": "cycle h23 00:05",
+    "value": "00:05",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "hour": "2-digit",
+      "minute": "2-digit",
+      "hourCycle": "h23"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "00:05"
+  },
+  {
+    "name": "cycle h23 13:05",
+    "value": "13:05",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "hour": "2-digit",
+      "minute": "2-digit",
+      "hourCycle": "h23"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "13:05"
+  },
+  {
+    "name": "cycle h24 00:05",
+    "value": "00:05",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "hour": "2-digit",
+      "minute": "2-digit",
+      "hourCycle": "h24"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "24:05"
+  },
+  {
+    "name": "cycle h24 13:05",
+    "value": "13:05",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "hour": "2-digit",
+      "minute": "2-digit",
+      "hourCycle": "h24"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "13:05"
+  },
+  {
+    "name": "options {\"year\":\"2-digit\",\"month\":\"2-digit\",\"day\":\"2-digit\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "year": "2-digit",
+      "month": "2-digit",
+      "day": "2-digit"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "02/29/24"
+  },
+  {
+    "name": "options {\"weekday\":\"long\",\"era\":\"short\",\"year\":\"numeric\",\"month\":\"long\",\"day\":\"numeric\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "weekday": "long",
+      "era": "short",
+      "year": "numeric",
+      "month": "long",
+      "day": "numeric"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Thursday, February 29, 2024 AD"
+  },
+  {
+    "name": "options {\"month\":\"narrow\",\"weekday\":\"narrow\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "month": "narrow",
+      "weekday": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "F T",
+    "platformExpected": {
+      "macos-icu-78.1": "F, T"
+    }
+  },
+  {
+    "name": "options {\"hour\":\"numeric\",\"minute\":\"2-digit\",\"second\":\"2-digit\",\"fractionalSecondDigits\":3}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "hour": "numeric",
+      "minute": "2-digit",
+      "second": "2-digit",
+      "fractionalSecondDigits": 3
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:34:56.789 PM"
+  },
+  {
+    "name": "options {\"hour\":\"numeric\",\"dayPeriod\":\"long\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "hour": "numeric",
+      "dayPeriod": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12 noon"
+  },
+  {
+    "name": "options {\"hour\":\"numeric\",\"hour12\":false}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "hour": "numeric",
+      "hour12": false
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12"
+  },
+  {
+    "name": "options {\"hour\":\"numeric\",\"hourCycle\":\"h24\",\"hour12\":true}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "hour": "numeric",
+      "hourCycle": "h24",
+      "hour12": true
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12 PM"
+  },
+  {
+    "name": "options {\"calendar\":\"buddhist\",\"year\":\"numeric\",\"month\":\"long\",\"day\":\"numeric\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "calendar": "buddhist",
+      "year": "numeric",
+      "month": "long",
+      "day": "numeric"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "February 29, 2567 BE"
+  },
+  {
+    "name": "options {\"calendar\":\"notreal\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "calendar": "notreal"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56 PM"
+    }
+  },
+  {
+    "name": "options {\"numberingSystem\":\"arab\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "numberingSystem": "arab"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb ٢٩, ٢٠٢٤, ١٢:٣٤:٥٦ PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb ٢٩, ٢٠٢٤ at ١٢:٣٤:٥٦ PM"
+    }
+  },
+  {
+    "name": "options {\"dateStyle\":\"medium\",\"year\":\"numeric\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "medium",
+      "year": "numeric"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "options {\"timeStyle\":\"medium\",\"hour\":\"numeric\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "timeStyle": "medium",
+      "hour": "numeric"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "options {\"dateStyle\":\"invalid\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "dateStyle": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "options {\"month\":\"invalid\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "month": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "options {\"fractionalSecondDigits\":4}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "fractionalSecondDigits": 4
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "options {\"hourCycle\":\"invalid\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "hourCycle": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "options {\"calendar\":\"bad!\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "calendar": "bad!"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "options {\"numberingSystem\":\"bad!\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "numberingSystem": "bad!"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "options {\"formatMatcher\":\"invalid\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "formatMatcher": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "options {\"unknownOption\":\"ignored\"}",
+    "value": "2024-02-29T12:34:56.789Z",
+    "inputType": "string",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "unknownOption": "ignored"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56 PM"
+    }
+  },
+  {
+    "name": "zone name short",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "America/Los_Angeles",
+      "hour": "numeric",
+      "timeZoneName": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "4 AM PST"
+  },
+  {
+    "name": "zone name long",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "America/Los_Angeles",
+      "hour": "numeric",
+      "timeZoneName": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "4 AM Pacific Standard Time"
+  },
+  {
+    "name": "zone name shortOffset",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "America/Los_Angeles",
+      "hour": "numeric",
+      "timeZoneName": "shortOffset"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "4 AM GMT-8"
+  },
+  {
+    "name": "zone name longOffset",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "America/Los_Angeles",
+      "hour": "numeric",
+      "timeZoneName": "longOffset"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "4 AM GMT-08:00"
+  },
+  {
+    "name": "zone name shortGeneric",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "America/Los_Angeles",
+      "hour": "numeric",
+      "timeZoneName": "shortGeneric"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "4 AM PT"
+  },
+  {
+    "name": "zone name longGeneric",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeZone": "America/Los_Angeles",
+      "hour": "numeric",
+      "timeZoneName": "longGeneric"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "4 AM Pacific Time"
+  },
+  {
+    "name": "civil 0001-01-01",
+    "value": "0001-01-01",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Jan 1, 1"
+  },
+  {
+    "name": "civil 1000-03-01",
+    "value": "1000-03-01",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Mar 1, 1000"
+  },
+  {
+    "name": "civil 10000-01-01",
+    "value": "10000-01-01",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Jan 1, 10000"
+  },
+  {
+    "name": "civil 2023-02-29",
+    "value": "2023-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "civil 2024-13-01",
+    "value": "2024-13-01",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "civil 0000-01-01",
+    "value": "0000-01-01",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "civil 2024-02-29junk",
+    "value": "2024-02-29junk",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "clock 23:59:59.999",
+    "value": "23:59:59.999",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "11:59:59 PM"
+  },
+  {
+    "name": "clock 24:00",
+    "value": "24:00",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "clock 12:60",
+    "value": "12:60",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "clock 12:34:60",
+    "value": "12:34:60",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "clock 12:34:56.1234",
+    "value": "12:34:56.1234",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "civil rejects authored zone",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {
+      "timeZone": "UTC"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "civil rejects zone name",
+    "value": "12:30",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "timeZoneName": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "date rejects time fields",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {
+      "hour": "numeric"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "time rejects date fields",
+    "value": "12:30",
+    "inputType": "string",
+    "formatter": "time",
+    "options": {
+      "year": "numeric"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "range 2024-02-29 2024-03-02",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "2024-03-02",
+    "expected": "Feb 29 – Mar 2, 2024"
+  },
+  {
+    "name": "range 2024-02-29 2024-02-29",
+    "value": "2024-02-29",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "2024-02-29",
+    "expected": "Feb 29, 2024"
+  },
+  {
+    "name": "range 2024-03-02 2024-02-29",
+    "value": "2024-03-02",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "2024-02-29",
+    "expected": "Mar 2 – Feb 29, 2024"
+  },
+  {
+    "name": "styled cycle h11",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "dateStyle": "medium",
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hourCycle": "h11"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 0:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 0:34:56 PM"
+    }
+  },
+  {
+    "name": "styled cycle h12",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "dateStyle": "medium",
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hourCycle": "h12"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56 PM"
+    }
+  },
+  {
+    "name": "styled cycle h23",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "dateStyle": "medium",
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hourCycle": "h23"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56"
+    }
+  },
+  {
+    "name": "styled cycle h24",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "dateStyle": "medium",
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hourCycle": "h24"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Feb 29, 2024, 12:34:56",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56"
+    }
+  },
+  {
+    "name": "styled hour12 en-US true",
+    "value": 1709179500000,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hour12": true
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "4:05:00 AM"
+  },
+  {
+    "name": "styled hour12 en-US false",
+    "value": 1709179500000,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hour12": false
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "04:05:00"
+  },
+  {
+    "name": "styled hour12 ja-JP true",
+    "value": 1709179500000,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hour12": true
+    },
+    "locale": "ja-JP",
+    "operation": "format",
+    "expected": "午前4:05:00"
+  },
+  {
+    "name": "styled hour12 ja-JP false",
+    "value": 1709179500000,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hour12": false
+    },
+    "locale": "ja-JP",
+    "operation": "format",
+    "expected": "4:05:00"
+  },
+  {
+    "name": "styled hour12 fr-FR true",
+    "value": 1709179500000,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hour12": true
+    },
+    "locale": "fr-FR",
+    "operation": "format",
+    "expected": "04:05:00 AM"
+  },
+  {
+    "name": "styled hour12 fr-FR false",
+    "value": 1709179500000,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hour12": false
+    },
+    "locale": "fr-FR",
+    "operation": "format",
+    "expected": "04:05:00"
+  },
+  {
+    "name": "styled hour12 en-US-u-hc-h24 true",
+    "value": 1709179500000,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hour12": true
+    },
+    "locale": "en-US-u-hc-h24",
+    "operation": "format",
+    "expected": "04:05:00 AM"
+  },
+  {
+    "name": "styled hour12 en-US-u-hc-h24 false",
+    "value": 1709179500000,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "timeStyle": "medium",
+      "timeZone": "UTC",
+      "hour12": false
+    },
+    "locale": "en-US-u-hc-h24",
+    "operation": "format",
+    "expected": "04:05:00"
+  },
+  {
+    "name": "zone validation america/los_angeles",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "hour": "numeric",
+      "timeZone": "america/los_angeles"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "4 AM"
+  },
+  {
+    "name": "zone validation asia/kolkata",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "hour": "numeric",
+      "timeZone": "asia/kolkata"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "6 PM"
+  },
+  {
+    "name": "zone validation Pacific Standard Time",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "hour": "numeric",
+      "timeZone": "Pacific Standard Time"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "zone validation +24:00",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "hour": "numeric",
+      "timeZone": "+24:00"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "zone validation +05",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "hour": "numeric",
+      "timeZone": "+05"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "5 PM"
+  },
+  {
+    "name": "zone validation GMT+05:30",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "time",
+    "options": {
+      "hour": "numeric",
+      "timeZone": "GMT+05:30"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "historic range 0001-01-01",
+    "value": "0001-01-01",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "0001-01-03",
+    "expected": "Jan 1 – 3, 1"
+  },
+  {
+    "name": "historic range 1000-02-28",
+    "value": "1000-02-28",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "1000-03-02",
+    "expected": "Feb 28 – Mar 2, 1000"
+  },
+  {
+    "name": "historic range 10000-01-01",
+    "value": "10000-01-01",
+    "inputType": "string",
+    "formatter": "date",
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "10000-01-03",
+    "expected": "Jan 1 – 3, 10000"
+  },
+  {
+    "name": "instant range 1709210096789 1709210096789",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": 1709210096789,
+    "expected": "Feb 29, 2024, 12:34:56 PM",
+    "platformExpected": {
+      "macos-icu-78.1": "Feb 29, 2024 at 12:34:56 PM"
+    }
+  },
+  {
+    "name": "instant range 1709210096789 1709213696789",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": 1709213696789,
+    "expected": "Feb 29, 2024, 12:34:56 PM – 1:34:56 PM"
+  },
+  {
+    "name": "default fields plus zone short",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "timeZoneName": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "default fields plus zone long",
+    "value": 1709210096789,
+    "inputType": "number",
+    "formatter": "dateTime",
+    "options": {
+      "timeZone": "UTC",
+      "timeZoneName": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "civil clock parts long",
+    "value": "12:34:56",
+    "inputType": "time",
+    "formatter": null,
+    "options": {
+      "timeStyle": "long"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "hour",
+        "value": "12"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "minute",
+        "value": "34"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "second",
+        "value": "56"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "dayPeriod",
+        "value": "PM"
+      }
+    ]
+  },
+  {
+    "name": "civil datetime parts long",
+    "value": "2024-02-29T12:34:56",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {
+      "dateStyle": "long",
+      "timeStyle": "long"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "month",
+        "value": "February"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "day",
+        "value": "29"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "year",
+        "value": "2024"
+      },
+      {
+        "type": "literal",
+        "value": " at "
+      },
+      {
+        "type": "hour",
+        "value": "12"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "minute",
+        "value": "34"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "second",
+        "value": "56"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "dayPeriod",
+        "value": "PM"
+      }
+    ]
+  },
+  {
+    "name": "civil collapsed range long",
+    "value": "2024-02-29T12:34:56",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {
+      "dateStyle": "long",
+      "timeStyle": "long"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "2024-02-29T12:34:56",
+    "expected": "February 29, 2024 at 12:34:56 PM"
+  },
+  {
+    "name": "civil clock long",
+    "value": "12:34:56",
+    "inputType": "time",
+    "formatter": null,
+    "options": {
+      "timeStyle": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:34:56 PM"
+  },
+  {
+    "name": "civil datetime long",
+    "value": "2024-02-29T12:34:56",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {
+      "dateStyle": "long",
+      "timeStyle": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "February 29, 2024 at 12:34:56 PM"
+  },
+  {
+    "name": "civil range long",
+    "value": "2024-02-29T12:34:56",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {
+      "dateStyle": "long",
+      "timeStyle": "long"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "2024-03-01T13:35:57",
+    "expected": "February 29, 2024 at 12:34:56 PM – March 1, 2024 at 1:35:57 PM"
+  },
+  {
+    "name": "civil clock parts full",
+    "value": "12:34:56",
+    "inputType": "time",
+    "formatter": null,
+    "options": {
+      "timeStyle": "full"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "hour",
+        "value": "12"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "minute",
+        "value": "34"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "second",
+        "value": "56"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "dayPeriod",
+        "value": "PM"
+      }
+    ]
+  },
+  {
+    "name": "civil datetime parts full",
+    "value": "2024-02-29T12:34:56",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {
+      "dateStyle": "long",
+      "timeStyle": "full"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "month",
+        "value": "February"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "day",
+        "value": "29"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "year",
+        "value": "2024"
+      },
+      {
+        "type": "literal",
+        "value": " at "
+      },
+      {
+        "type": "hour",
+        "value": "12"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "minute",
+        "value": "34"
+      },
+      {
+        "type": "literal",
+        "value": ":"
+      },
+      {
+        "type": "second",
+        "value": "56"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "dayPeriod",
+        "value": "PM"
+      }
+    ]
+  },
+  {
+    "name": "civil collapsed range full",
+    "value": "2024-02-29T12:34:56",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {
+      "dateStyle": "long",
+      "timeStyle": "full"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "2024-02-29T12:34:56",
+    "expected": "February 29, 2024 at 12:34:56 PM"
+  },
+  {
+    "name": "civil clock full",
+    "value": "12:34:56",
+    "inputType": "time",
+    "formatter": null,
+    "options": {
+      "timeStyle": "full"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "12:34:56 PM"
+  },
+  {
+    "name": "civil datetime full",
+    "value": "2024-02-29T12:34:56",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {
+      "dateStyle": "long",
+      "timeStyle": "full"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "February 29, 2024 at 12:34:56 PM"
+  },
+  {
+    "name": "civil range full",
+    "value": "2024-02-29T12:34:56",
+    "inputType": "datetime-local",
+    "formatter": null,
+    "options": {
+      "dateStyle": "long",
+      "timeStyle": "full"
+    },
+    "locale": "en-US",
+    "operation": "formatRange",
+    "end": "2024-03-01T13:35:57",
+    "expected": "February 29, 2024 at 12:34:56 PM – March 1, 2024 at 1:35:57 PM"
+  }
+]

@@ -1,0 +1,63 @@
+{
+  "base": "15602ccf9bebeedf19eaf37245e994a9e33de608",
+  "scope": "Native prop and nested field compilation ignores inert authoring annotations while preserving active/unsupported declaration checks. Incremental compiler compatibility work in the unfinished renderer goal.",
+  "sourceHashes": {
+    "CHANGELOG.md": "a0da714fd3785734cd9ae34f4d9cb6108b1d1eb4bb1338e043f75881c2787ad6",
+    "packages/html-next-dotnet/README.md": "9442cef050629331bc9fc046787dac7b1bac6ac48c50c55157fabb25e423a88c",
+    "packages/html-next-dotnet/src/HtmlNext/DeclarationTypes.cs": "a82a02936e7974f8efb56f01f9bccc5a919a6c8c4bf57474bf6105c684be97b4",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "c706ee120285c8c635ab4db7a4968e3adee086720ab7725df1e5df5296b4ce47",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/InterfaceDeclarationTests.cs": "b459f6ecebacaaadcd0bbdb2118314283b99942c26f9a7f78bfa23bf5087e5ab",
+    "packages/html-next-dotnet/tests/fixtures/interface-declarations.json": "e190acf11ae8d449f127b1ba5b8a826871d32228b2d2de9b99731b0d542f62aa"
+  },
+  "proof": {
+    "sharedCases": 2,
+    "nativeBeforeFix": "The top-level tooling annotation and nested data-note case failed. Fifty existing interface cases passed.",
+    "guardCharacterization": "Eight rejection cases cover top-level and nested onclick, on:click, nonce, blocking, pattern, nullable, $if and from:value. All pass before and after implementation.",
+    "nodeBaseline": {
+      "passed": 53,
+      "skipped": 0
+    },
+    "focusedNative": {
+      "passed": 135,
+      "skipped": 0
+    }
+  },
+  "verification": {
+    "development": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:inner",
+      "exitCode": 0,
+      "javascript": {
+        "passed": 2116,
+        "explicitlyGatedSkips": 5012
+      },
+      "native": {
+        "passed": 904,
+        "skipped": 0
+      },
+      "fluidFullOutputValidations": 5,
+      "nativeClientIntegration": {
+        "passed": 6,
+        "browserGatedSkips": 3
+      }
+    },
+    "wholePrCheckpoint": "The preceding15602ccf selected-default commit passed verify:pr and the separate three-engine browser gate. This compiler-only increment ran verify:inner; the full goal still requires its final verify:pr, catalog and compatibility gates."
+  },
+  "catalog": {
+    "loomaCommit": "714d557c0e042a16a274f107f77dcccd67070b69",
+    "entries": 106,
+    "nativeCompiles": 80,
+    "remainingFirstFailures": 26,
+    "scope": "Compilation only, not rendering or browser qualification. Annotation diagnostics are resolved; further failures include styles, formatting, select and comparisons."
+  },
+  "review": {
+    "method": "Bounded single-agent lite correctness review and inline five-rubric simplification.",
+    "retainedFindings": [],
+    "simplificationEdits": 0,
+    "proofTestsPreserved": true
+  },
+  "limitations": [
+    "No new runtime or bundle cost introduced. No performance or memory claim follows from this compiler-only change.",
+    "Native renderer, preparation, browser compatibility, full catalog and fair Fluid/Node speed/memory/serving objective remain unfinished.",
+    "Framework/runtime publication remains pending the owner rollout choice; no package publication was performed by this increment."
+  ]
+}

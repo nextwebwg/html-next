@@ -89,6 +89,16 @@
       "name": "constrained-request",
       "source": "<template component=\"x-interface\"><defs><request name=\"find\" type=\"string\" minlength=\"2\" returns=\"boolean\"></request></defs><output>Ready</output></template>",
       "expected": "<output>Ready</output>"
+    },
+    {
+      "name": "tooling-annotation",
+      "source": "<template component=\"x-interface\"><defs><prop name=\"active\" type=\"boolean\" default=\"true\" default-true-reason=\"Starts expanded\" data-note=\"Author note\">Active.</prop></defs><output>{$active}</output></template>",
+      "expected": "<output>true</output>"
+    },
+    {
+      "name": "nested-tooling-annotation",
+      "source": "<template component=\"x-interface\"><defs><prop name=\"settings\" type=\"object\" default=\"{active:true}\">Settings.<prop name=\"active\" type=\"boolean\" required data-note=\"Author note\">Active.</prop></prop></defs><output>{$settings.active}</output></template>",
+      "expected": "<output>true</output>"
     }
   ],
   "invalid": [

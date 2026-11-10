@@ -1,0 +1,348 @@
+{
+  "recordedAt": "2026-11-08T21:18:20.309943+00:00",
+  "base": "5d49eea54f332d9046b4746b504949d870192ef8",
+  "scope": "Default-first invocation attribute forwarding and boolean noforward, normalized by the shared JavaScript parser and aligned in native rendering. This is an incremental checkpoint in the unfinished C# renderer objective.",
+  "sourceHashes": {
+    "CHANGELOG.md": "1515a4e205c82ecb2fa665cc4ba235b70a8aef1ef308ba50030e775a194a694b",
+    "README.md": "815e29c29d04277fe19bd16f016ff511e60bbe372ec42cf103ceaa1624da4b3e",
+    "docs/guide/quick-start.md": "196c34c0ea7b2162b38d57825872f602906126352b81e9386ad4576a0238b353",
+    "packages/html-next-converter/tests/attribute-forwarding-parity.test.ts": "d3c2baa01165057efdf496bc39752ea14cca4b6d1a8075946800122ff8407aef",
+    "packages/html-next-converter/tests/converter.test.ts": "d51cdd0c88f116d8da8c7dd5f2f675d22613a566ca7af66ee312bdf3f94096ca",
+    "packages/html-next-converter/tests/preact.test.ts": "ea88bc3e98ca9539fc1f23dad5e0b87cd29bb4f963276558b4e6daf19a89b9dd",
+    "packages/html-next-converter/tests/svelte-converter.test.ts": "d66b0e423a356a74ad6025490347dff5bd6b7027cb18fa8fe9f8252b7e6cc023",
+    "packages/html-next-dotnet/README.md": "c6832b37ed2d3f74174dda3ac857958cf02aa795933566586753e70c6a1c1956",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "b710df8e5fa68367a14cf5134ac53f92596c209a296101c8a4efae9227d8a1d0",
+    "packages/html-next-dotnet/src/HtmlNext/InvocationAttributes.cs": "cf39305fb0b1448f828c318429912880e4774b4966b21573c107d44a9e75edfe",
+    "packages/html-next-dotnet/tests/fixtures/accepted-child-lists.json": "6d67fc0fb8fee1e6d9535fd2e2bbccbb99de3f475269ac10bd3870e16aa261d3",
+    "packages/html-next-dotnet/tests/fixtures/attribute-forwarding.json": "edc518ebbcc255f6341f2f30de7c678baa1620f83ecd54a1013ec08bd59862f9",
+    "packages/html-next-dotnet/tests/fixtures/deferred-components.json": "30f3ac23f133f164f1941dfe4a60be1c7b6833441491f2c54669593f66a3e5dc",
+    "packages/html-next-dotnet/tests/fixtures/invocation-attributes.json": "c33a6dde5f97b90b49b6e3471cb2bf334756bfa38852fc325c68581f8f83cd47",
+    "packages/html-next-unplugin/tests/dotnet-hydration.test.ts": "5115d14f0356c21054b4039fb5ccf8bf5be2c6bc055e01d0446e0b835e278ac8",
+    "packages/html-next-unplugin/tests/unplugin.test.ts": "d3a4c2bf2380cd898df2ceac5629709e3c4caf9545c149dc662cf89cbe949d02",
+    "packages/html-next/docs/component-registry.md": "855e8d7e55d1230a8a33ad2ddfa7669bd1f8ff49a5a45bb79035117cd1dc2fc3",
+    "packages/html-next/docs/server-rendering.md": "b1e7a2ba3b437be36ccfae003843f1bef1ee4f025eab7801ad34d078c589adcb",
+    "packages/html-next/scripts/measure-runtime-size.ts": "a58f98e40cfaf539e43ed7f2a33ed449ea466acf2dbf859d2e82840df3b9849c",
+    "packages/html-next/src/package.ts": "a2ddac9c0656e95a7805e6a89cbadd00cfbfa472f5bd1eb14262f293cc0dc21d",
+    "packages/html-next/src/parser.ts": "327368a3a6e25d78fdaac524b27ce3be0e0dc81801d45839d21c8a74ca7623b7",
+    "packages/html-next/src/runtime.ts": "35c565e6c5da105c56c6fb13d51ad5f392cc9d42197b85e164e75dcff016f93d",
+    "packages/html-next/src/targets/svelte.ts": "6102615bc2dd18b0832803b976ccdf50df24af1b31ab64d1bc86fde74c4b40e3",
+    "packages/html-next/tests/attribute-forwarding-browser.test.ts": "bd788ebf680a45ebbcb9915ff7deb5842be5ae62a412b4f8bdacd2d7dc6d5a6e",
+    "packages/html-next/tests/attribute-forwarding-hot.ts": "d6792c3be2e6357dff43302ca5e1837011030415fcb394a9a42de45791f56522",
+    "packages/html-next/tests/cli.test.ts": "b047f6abde53aa1a48d84b3e66d9c2c3b826fb1b0201f044a9bcb400ddcf61ff",
+    "packages/html-next/tests/compiled-interop.test.ts": "30e2230890d5bcf10fbcb8216a41134676ec65b56decae5442814e4a9bb2170e",
+    "packages/html-next/tests/generate.test.ts": "28d0a01fcc61ac7b076406ab8bdcf4b01b4b515caccbfb4828bf7db77b4a3488",
+    "packages/html-next/tests/parser.test.ts": "a6d8a0c0d70a1591163a644689ac3237769b822e534a27f94025a15035778386",
+    "packages/html-next/tests/react-controller-contract.test.ts": "7d410637da3d268f98d0ac7c9d9fe9edb2d16aa1186f759c7471321301e219f7",
+    "packages/html-next/tests/server.test.ts": "6c208decdcf3cd6708f57793bfc343de9935533d53526c622fbbf2064d0f4adf",
+    "packages/html-next/tests/targets.test.ts": "a3854fedeb80b3719ccf36859257692613785011ba614e2fe74019fb30ccc74d",
+    "packages/html-next/tests/vanilla-blocks.test.ts": "6917ce4856803d952356b7125e8ebcd9fa6c050371d94972045ab279a8900afc"
+  },
+  "verification": {
+    "repository": {
+      "command": "corepack pnpm verify:pr",
+      "exitCode": 0,
+      "javascript": {
+        "passed": 2137,
+        "explicitlyGatedSkips": 5026,
+        "seconds": 460.89
+      },
+      "native": {
+        "passed": 966,
+        "skipped": 0
+      },
+      "fullFluidOutputValidations": 5,
+      "nativeClient": {
+        "passed": 11,
+        "browserGatedSkips": 12
+      },
+      "packedPackageChecks": {
+        "passed": 8,
+        "seconds": 76.73
+      }
+    },
+    "sourceLocationRegression": {
+      "red": "Copying root nodes while prepending implicit forwarding lost WeakMap diagnostic coordinates. The packed check lost HN001 line2,column3; the new ordinary/delegated/match-arm location test failed.",
+      "fix": "Normalize original nodes before freezing them.",
+      "focusedCommand": "corepack pnpm exec vitest run packages/html-next/tests/parser.test.ts packages/html-next-unplugin/tests/check.test.ts --maxWorkers=1",
+      "passed": 139,
+      "packedCliAssertion": "Passed unchanged in final repository gate."
+    },
+    "browsers": {
+      "frameworkParity": {
+        "passed": 84,
+        "skipped": 0,
+        "seconds": 317.65,
+        "targets": [
+          "live",
+          "vanilla",
+          "vue",
+          "react",
+          "preact",
+          "svelte",
+          "angular"
+        ],
+        "engines": [
+          "Chromium",
+          "Firefox",
+          "WebKit"
+        ],
+        "modes": [
+          "development",
+          "production"
+        ],
+        "mounts": [
+          "fresh",
+          "hydrated"
+        ]
+      },
+      "svelteFollowup": {
+        "passed": 12,
+        "skipped": 0,
+        "seconds": 44.99,
+        "reason": "Svelte-only invocationProps type-boundary correction after the full matrix; unchanged framework checker passed."
+      },
+      "liveFollowup": {
+        "passed": 15,
+        "skipped": 0,
+        "seconds": 8.97,
+        "reason": "Avoid writes of unchanged attributes during ordered forwarding replay."
+      },
+      "nativeClient": {
+        "passed": 23,
+        "skipped": 0,
+        "seconds": 32.73
+      },
+      "firefox": "Owned pinned Playwright1.64.0 Linux container, stopped and removed."
+    },
+    "allocations": {
+      "fullOutputsValidated": 5,
+      "nativeTotalBytes": {
+        "card": 240,
+        "list-10": 1984,
+        "list-100": 19264,
+        "list-1000": 195664,
+        "cart-100": 19072
+      },
+      "comparison": "Unchanged for these five workloads. No latency, retained/peak memory, or serving claim."
+    }
+  },
+  "size": {
+    "command": "corepack pnpm measure:runtime",
+    "status": "Passed within final repository gate.",
+    "live": {
+      "bundle": {
+        "bytes": 289924,
+        "gzip": 97069
+      },
+      "capabilityProfile": {
+        "complete": true,
+        "requiredModules": {
+          "componentGraph": "packages/html-next/src/graph.ts",
+          "controllerHost": "packages/html-next/src/controller.ts",
+          "declaredData": "packages/html-next/src/data.ts",
+          "expressionEvaluation": "packages/html-next/src/expression.ts",
+          "generalRuntime": "packages/html-next/src/runtime.ts",
+          "liveSource": "packages/html-next/src/browser-source.ts",
+          "proposalParser": "packages/html-next/src/parser.ts",
+          "reactivity": "packages/html-next/src/reactivity.ts",
+          "sanitization": "packages/html-next/src/sanitize.ts",
+          "scopedStyles": "packages/html-next/src/component-styles.ts",
+          "typeSystem": "packages/html-next/src/type-system.ts"
+        },
+        "missingModules": []
+      },
+      "forbiddenServerModules": {
+        "parse5": 0,
+        "generatedDomPropertyInventory": 0
+      },
+      "unclassifiedModules": []
+    },
+    "generated": {
+      "static": {
+        "bytes": 21690,
+        "gzip": 8580,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 8580,
+        "targetMet": true
+      },
+      "reactive": {
+        "bytes": 21301,
+        "gzip": 8334,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 8334,
+        "targetMet": true
+      },
+      "prop": {
+        "bytes": 39597,
+        "gzip": 14567,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 14567,
+        "targetMet": true
+      },
+      "await": {
+        "bytes": 41810,
+        "gzip": 15209,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 15209,
+        "targetMet": true
+      },
+      "state": {
+        "bytes": 45714,
+        "gzip": 16486,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 16486,
+        "targetMet": true
+      },
+      "computed": {
+        "bytes": 23153,
+        "gzip": 9029,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 9029,
+        "targetMet": true
+      },
+      "keyed": {
+        "bytes": 21861,
+        "gzip": 8764,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 8764,
+        "targetMet": true
+      },
+      "data": {
+        "bytes": 22221,
+        "gzip": 8635,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 8635,
+        "targetMet": true
+      },
+      "controller": {
+        "bytes": 21829,
+        "gzip": 8621,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 8621,
+        "targetMet": true
+      },
+      "request": {
+        "bytes": 26611,
+        "gzip": 10322,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 10322,
+        "targetMet": true
+      },
+      "headNone": {
+        "bytes": 35610,
+        "gzip": 12957,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 12957,
+        "targetMet": true
+      },
+      "headStatic": {
+        "bytes": 41277,
+        "gzip": 15022,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 15022,
+        "targetMet": true
+      },
+      "headJson": {
+        "bytes": 41586,
+        "gzip": 15161,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 15161,
+        "targetMet": true
+      },
+      "headScript": {
+        "bytes": 47092,
+        "gzip": 17101,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 17101,
+        "targetMet": true
+      },
+      "controllerKeyed": {
+        "bytes": 23706,
+        "gzip": 9444,
+        "fullRuntimeModules": 0,
+        "parserModules": 0,
+        "forbiddenModules": [],
+        "targetGzip": 9444,
+        "targetMet": true
+      }
+    },
+    "comparisonBase": "d898f542777422c5b3f7ef09b0561fe7605eaa02",
+    "generatedGzip9Deltas": {
+      "static": 501,
+      "reactive": 474,
+      "prop": 279,
+      "await": 431,
+      "state": 251,
+      "computed": 483,
+      "keyed": 469,
+      "data": 445,
+      "controller": 526,
+      "request": 527,
+      "headNone": 443,
+      "headStatic": 265,
+      "headJson": 257,
+      "headScript": 236,
+      "controllerKeyed": 339
+    },
+    "comparisonLimit": "Earlier ad hoc runs from the repository root misclassified live metafile paths and exited1. Only their generated gzip measurements are used for the comparison; the successful package-owned command above supplies live capability evidence.",
+    "limits": "All15 generated ceilings equal measured gzip9 totals. No allowance added and no forbidden-module rule relaxed."
+  },
+  "review": {
+    "method": "One bounded single-agent lite correctness review and five-rubric inline simplification. No independent or cross-model agents.",
+    "resolved": [
+      "Source normalization lost diagnostic provenance.",
+      "Breaking changelog still described superseded explicit-only forwarding."
+    ],
+    "remainingFindings": [],
+    "simplificationEdits": 0,
+    "proofTestsPreserved": true
+  },
+  "deliveryCheckpoint": {
+    "proposal": {
+      "pr": "https://github.com/nextwebwg/specs/pull/174",
+      "state": "merged",
+      "commit": "f5b66c49853ea9c15f56d866533311ddb03b4b38",
+      "renderedSite": "Deployment queued for the configured self-hosted runner at this checkpoint."
+    },
+    "looma": {
+      "sourceCommit": "915afd2e8fafdba86887ea4eefd3b3534c20de5a",
+      "components": 111,
+      "completeFrameworkCompilations": 6,
+      "browserQualification": "In progress. Complete shared assertions remain a publication gate."
+    },
+    "npm": "Not yet published at this checkpoint. The obsolete explicit-only alpha92 candidate must not be published.",
+    "nuget": "Not published; native package remains private."
+  },
+  "limitations": [
+    "Full native CSSOM,Intl/select/calendar handling,complete catalog behavior and hydration,application preparation,and matched Fluid/Node timing,memory and serving evidence remain unfinished.",
+    "This checkpoint does not establish completion of the C# renderer or complete Looma browser qualification."
+  ]
+}

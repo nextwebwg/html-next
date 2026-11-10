@@ -4,16 +4,22 @@ namespace HtmlNext;
 
 internal static class DeclarationTypes
 {
+    public static void CheckAttributes(IElement declaration, string source, bool nested = false)
+    {
+        foreach (var attribute in declaration.Attributes)
+            if (attribute.Name is "pattern" or "nullable" or "nonce" or "blocking"
+                || nested && attribute.Name == "default" || attribute.Name.StartsWith('$')
+                || attribute.Name.StartsWith("on", StringComparison.OrdinalIgnoreCase) || attribute.Name.Contains(':'))
+                throw ValueType.Error(source, $"Unsupported declaration attribute '{attribute.Name}'.");
+    }
+
     public static ValueType Read(IElement declaration, string source, bool nested, Func<string, ValueType, object?> parse, bool javaScriptValues = false, IElement[]? fieldElements = null)
     {
         ExecutionStack.Check(source);
         var written = declaration.GetAttribute("type") ?? (nested ? throw ValueType.Error(source, "A nested field requires a type.") : "string");
         var children = fieldElements ?? declaration.Children.ToArray();
         if (children.Any(child => child.LocalName != "prop")) throw ValueType.Error(source, "Only nested prop fields belong in a structured declaration.");
-        foreach (var child in children)
-            foreach (var attribute in child.Attributes)
-                if (attribute.Name is not ("name" or "type" or "required" or "open" or "values" or "min" or "max" or "minlength" or "maxlength"))
-                    throw ValueType.Error(source, $"Unsupported nested field attribute '{attribute.Name}'.");
+        foreach (var child in children) CheckAttributes(child, source, nested: true);
         if (declaration.HasAttribute("open") && written != "object") throw ValueType.Error(source, "Only an expanded object can be open.");
         ValueType type;
         if (written == "list")

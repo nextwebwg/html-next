@@ -188,9 +188,11 @@ internal sealed record SlotOutlet(string Name, RenderOperation[] Fallback, Scope
         if (Inputs?.ExposesProps == true) throw ValueType.Error(Inputs.Source, $"Scoped slot '{Name}' requires a consumer <template slot=\"{Name}\">.");
     }
 
-    internal void WriteMissing(ref HtmlWriter writer, object?[] values, CancellationToken cancellation, bool deferred) => WritePlacement(ref writer, values, cancellation, deferred, true);
+    internal void WriteMissing(ref HtmlWriter writer, object?[] values, CancellationToken cancellation, bool deferred) => WritePlacement(ref writer, values, cancellation, deferred, true, -1);
 
-    private void WritePlacement(ref HtmlWriter writer, object?[] values, CancellationToken cancellation, bool deferred, bool missing = false)
+    internal void WriteBorrowed(ref HtmlWriter writer, object?[] values, CancellationToken cancellation, bool deferred, int index) => WritePlacement(ref writer, values, cancellation, deferred, borrowed: index);
+
+    private void WritePlacement(ref HtmlWriter writer, object?[] values, CancellationToken cancellation, bool deferred, bool missing = false, int? borrowed = null)
     {
         cancellation.ThrowIfCancellationRequested();
         var frame = missing ? null : writer.Context?.ProjectionFor(values);
@@ -213,12 +215,18 @@ internal sealed record SlotOutlet(string Name, RenderOperation[] Fallback, Scope
         }
         try
         {
-            if ((!assigned || template >= 0) && body.Length == 0)
+            if ((!assigned || template >= 0) && body.Length == 0 && borrowed is null)
             {
                 writer.Write("<?marker slot=\""); writer.Write(Name); writer.Write("\"?>");
                 return;
             }
             writer.Write("<?start slot=\""); writer.Write(Name); writer.Write('"');
+            if (borrowed is { } index)
+            {
+                writer.Write(" of=\"");
+                if (index >= 0) HtmlOutput.Number(ref writer, index);
+                writer.Write('"');
+            }
             if (!assigned) writer.Write(" fallback=\"\"");
             if (template >= 0 || Inputs?.ExposesProps == true) writer.Write(" scoped=\"\"");
             writer.Write("?>");

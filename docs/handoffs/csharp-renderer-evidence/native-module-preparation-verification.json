@@ -1,0 +1,170 @@
+{
+  "base": "f3984d65dc555d826bf5fbee61693adae55688cf",
+  "scope": "Request-scoped native completed successful module reads, canonical selected-input identities and the existing generated-client adoption protocol.",
+  "sourceHashes": {
+    "CHANGELOG.md": "6fe3ef55b3e44991f8936bd25fde395615939273c547b5c82af1214cce2ad40a",
+    "packages/html-next-dotnet/README.md": "bc302d6050150c368ab498086791c54f0b9ecb9d83c0bad32780a9abc65ec113",
+    "packages/html-next-dotnet/src/HtmlNext/BindingSnapshot.cs": "7f7ca65f8ec795c3218e8db9571137f3b6e479a985cfec96d352c43a057d207e",
+    "packages/html-next-dotnet/src/HtmlNext/BindingValueCodec.cs": "2cbed2fd050adc184bea7602e4cf2552ebb72a4dcf4b83fcb6bfcd9ce91c17a2",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "81b33ad8c4d3e3f34c03e14a55b2dc5fe41c052f1f3e56175743550ab40983e9",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentCall.cs": "1da455cc27a8e3a065c007a570470f95178844da69b68b7d706efedc2776bf0c",
+    "packages/html-next-dotnet/src/HtmlNext/ExpressionCompiler.cs": "d222293b5fa969ac4b260ffc1844e9f5a56165fb27c3acc29afbd05d0360fd05",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "2c2cbb6c9b1ba54e685e638d05a58cb8116e5eb94516b939f64637b1bda53576",
+    "packages/html-next-dotnet/src/HtmlNext/HydrationRecords.cs": "f06d573b3d3144abffca2178ed508fa977376da749856cc596bd412ca35df4d5",
+    "packages/html-next-dotnet/src/HtmlNext/LocalDeclaration.cs": "5943349ad44549677b6db05cf7f224b385a7ec194d58db3e0b163f6a98181d0a",
+    "packages/html-next-dotnet/src/HtmlNext/ModulePreparation.cs": "829673014fba7b69e26ae60b0d406dbfd45c95c78a15339cba4a8098a19d0689",
+    "packages/html-next-dotnet/tests/HtmlNext.FixtureHost/Program.cs": "d180a4d802457a029bdfe8a962b5dec1557e3d85c12c5b48ac74887ccc9c8725",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/ModulePreparationTests.cs": "6bfc337ba66bb4682f69390a637f6ba448a0fbdcf4d69556ffb8fda30923f1b4",
+    "packages/html-next-unplugin/tests/dotnet-hydration.test.ts": "125e858bca194d74ce2549451c8083d3e6129a46a08a7801432dc8072b306914"
+  },
+  "proof": {
+    "native": "Initial executor, default-versus-waiting seed, JSON-null, source-associated getter and non-string selected-key cases failed before their fixes. Final focused native suite: 942 passed, zero skipped.",
+    "nodeSeedOracle": {
+      "cases": 2,
+      "equal": true,
+      "detail": "Waiting seeds initialize after completion; seeds with an available literal default retain their one-time value, matching actual Node server preparation."
+    },
+    "canonicalKeys": {
+      "cases": 26,
+      "passed": 26,
+      "failed": 0,
+      "finiteNumericInputs": 5000,
+      "expectedRejections": 6,
+      "detail": "Compared actual production C# codec against JavaScript JSON.stringify(encodeHydrationValue()). Covers shared references, numeric property ordering, negative zero, undefined/absent/invalid and UTF-16."
+    },
+    "browser": {
+      "command": "HTMLNEXT_BROWSER_TEST=1 HTMLNEXT_FIREFOX_ENDPOINT=ws://127.0.0.1:39991/native-hydration node scripts/test-dotnet-client.ts",
+      "passed": 13,
+      "skipped": 0,
+      "seconds": 17.63,
+      "engines": [
+        "Chromium local",
+        "Firefox pinned Playwright Linux container",
+        "WebKit local"
+      ],
+      "detail": "Native completion transferred to real generated bindModule client: no initial load repeated, original rows/control/early edit retained, subsequent input change loads once and updates rows, draft keeps its initial seed."
+    }
+  },
+  "verification": {
+    "verifyPr": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "javascript": {
+        "passed": 2116,
+        "explicitlyGatedSkips": 5016,
+        "seconds": 323.19
+      },
+      "native": {
+        "passed": 942,
+        "skipped": 0
+      },
+      "fluidFullOutputValidations": 5,
+      "nativeClientIntegration": {
+        "passed": 7,
+        "browserGatedSkips": 6,
+        "seconds": 4.18
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "skipped": 0,
+        "seconds": 60.71
+      }
+    }
+  },
+  "review": {
+    "scope": "All14 changed source/test/document paths against f3984d65, including the large native execution and serialization change.",
+    "method": "One bounded full-scope inline correctness and simplification pass. No independent/cross-model reviewers were requested or dispatched, under the user's minimum safe single-agent and review-cost instructions.",
+    "areas": [
+      "Native prop binding, caller ownership and typed output refusal.",
+      "Default-versus-waiting state initialization, lazy actual reads and request isolation.",
+      "Canonical JavaScript selected-input keys, surrogate/number/object ordering, shared identity and invalid values.",
+      "Existing prepared-module transfer/adoption, source revisions and generated-client reachability.",
+      "Optional transfer storage, record replay, cancellation, source-associated errors and API documentation."
+    ],
+    "findings": [
+      {
+        "id": "M1",
+        "severity": "P2",
+        "status": "fixed",
+        "file": "packages/html-next-dotnet/src/HtmlNext/HydrationRecords.cs",
+        "firstEvidence": "var prepared = new Dictionary<string, PreparedModuleRecord>(StringComparer.Ordinal);",
+        "problem": "Preparation storage was allocated for every interactive instance, including graphs that never use it.",
+        "fix": "Keep preparation records/serialized transfers in a lazy request-owned preparation state and allocate root transfer maps only when records exist. InstanceInputs retains its ordinary shape.",
+        "proof": "A100-child interactive render uses9696fewer allocated bytes per render than the initial packet implementation, with identical full-output length/hash;941 native cases passed after the correction."
+      },
+      {
+        "id": "M2",
+        "severity": "P2",
+        "status": "fixed",
+        "file": "packages/html-next-dotnet/src/HtmlNext/BindingSnapshot.cs",
+        "firstEvidence": "Fields: ModelAccess.Names(value).Select(name => new ValueType.Field(name, Unknown)).ToArray()",
+        "problem": "Non-string IDictionary keys were silently discarded while computing a selected-input completion identity, yielding an empty record.",
+        "fix": "Reject non-string record keys with HNCS008 at the transferable-input boundary.",
+        "proof": "The new public-boundary case failed with no exception before the guard; all942native tests pass after it."
+      }
+    ],
+    "simplification": {
+      "applied": {
+        "reuse": 0,
+        "quality": 0,
+        "efficiency": 1,
+        "tests": 0,
+        "comments": 0
+      },
+      "proofTestsPreserved": true,
+      "note": "Reused the native input/declaration machinery and existing ECMAScript number formatting. Kept the canonical key encoder separate from instance-record encoding because key identity requires the JavaScript canonical representation."
+    },
+    "coverageLimits": [
+      "The review covers this increment, not completion of the full native goal.",
+      "Pending/error/stale and renderer-owned asynchronous preparation remain unfinished.",
+      "The callback currently exposes accepted props and explicit completion inputs; richer state/context provider integration remains future work.",
+      "Prepared accepted-child browser records and the full Looma qualification remain unfinished.",
+      "No latency, retained/peak-memory or serving claim."
+    ],
+    "validation": "Final verify:pr passed, all 14 frozen source hashes match, and all 13 integration/browser cases passed without skips."
+  },
+  "allocationEvidence": {
+    "scope": "One full-output-validated100-child interactive workload,200repetitions. Before versus after this packet's optional preparation-storage correction, not versus a released native version.",
+    "before": {
+      "children": 100,
+      "repetitions": 200,
+      "perRenderBytes": 419072,
+      "outputLength": 40016,
+      "outputSha256": "8cb4e415baa628cb2f8c88068a34790bc8e99ebc80cd68d233eda5983f5b0e86"
+    },
+    "after": {
+      "children": 100,
+      "repetitions": 200,
+      "perRenderBytes": 409376,
+      "outputLength": 40016,
+      "outputSha256": "8cb4e415baa628cb2f8c88068a34790bc8e99ebc80cd68d233eda5983f5b0e86"
+    },
+    "bytesSavedPerRender": 9696,
+    "limitations": "Current-thread allocated bytes only. No timing, retained/peak-memory, serving, or general performance claim."
+  },
+  "limits": [
+    "Successful completed reads only. Pending/error/stale and renderer-owned asynchronous preparation remain unfinished.",
+    "The callback exposes accepted props and ownership; richer state/context provider integration and complete accepted-child adoption remain unfinished.",
+    "The native catalog is not yet fully compiled or browser-qualified. This is an increment toward the active C# goal.",
+    "No latency, retained/peak-memory or serving claim.",
+    "The four JavaScript packages remain unpublished while the companion Looma rollout scope question is pending. The .NET package remains private."
+  ],
+  "allocationObserver": {
+    "nativeAllocatedBytes": [
+      240,
+      1984,
+      19264,
+      195664,
+      19072
+    ],
+    "workloads": [
+      "card",
+      "list-10",
+      "list-100",
+      "list-1000",
+      "cart-100"
+    ],
+    "fullOutputsValidated": 5,
+    "scope": "After optional preparation-storage correction, before final transferable non-string-key refusal. That guard does not execute in these ordinary noninteractive workloads. No timing or general performance claim."
+  }
+}

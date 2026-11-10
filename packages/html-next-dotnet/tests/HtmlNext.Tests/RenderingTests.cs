@@ -26,6 +26,21 @@ public sealed class RenderingTests
         Assert.Equal("x-card", template.Tag);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ReadsDeclarationsBeforeOrAfterTheMarkupRoot(bool declarationsFirst)
+    {
+        const string declarations = """
+            <defs><prop name="label" type="string" default="Ready">Label.</prop><computed name="caption" from="concat($label, '!')"></computed></defs>
+            """;
+        const string markup = "<section>{$caption}</section>";
+        var template = HtmlNextCompiler.Compile("<template component=\"x-label\">"
+            + (declarationsFirst ? declarations + markup : markup + declarations) + "</template>");
+        Assert.Equal("<section>Ready!</section>", template.Render());
+        Assert.Equal("<section>Next!</section>", template.Render(new { label = "Next" }));
+    }
+
     [Fact]
     public void ReadsStructPropertiesAndJsonValuesWithTheSameBindingNames()
     {
@@ -226,7 +241,6 @@ public sealed class RenderingTests
         Assert.Throws<HtmlNextException>(() => HtmlNextCompiler.Compile(Card.Replace("<article", "<article on:click=\"go\"")));
         Assert.Throws<HtmlNextException>(() => HtmlNextCompiler.Compile(Card.Replace("</defs>", "</defs><style>h2{color:red}</style>")));
         Assert.Throws<HtmlNextException>(() => HtmlNextCompiler.Compile(Card.Replace("<h2", "<x-child")));
-        Assert.Throws<HtmlNextException>(() => HtmlNextCompiler.Compile("<template component=\"x-select\"><select><slot>content</slot></select></template>"));
     }
 
     [Fact]

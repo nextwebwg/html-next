@@ -5,8 +5,10 @@ namespace HtmlNext;
 
 public sealed record HtmlNextRenderOptions
 {
-    /// <summary>Emit instance records for components selected by the matching compiler-owned client plan.</summary>
+    /// <summary>Emit SDK prop metadata and compiler-selected instance records for browser adoption.</summary>
     public bool Interactive { get; init; }
+    /// <summary>Supplies settled module data, preserving initialized state and completing waiting seeds.</summary>
+    public HtmlNextPrepareModule? PrepareModule { get; init; }
 }
 
 internal sealed record HydrationRegion(RenderOperation[] Body, string Prefix = "") : RenderOperation
@@ -26,7 +28,7 @@ internal sealed record HydrationRegion(RenderOperation[] Body, string Prefix = "
 
 internal sealed record HydrationState(string Name, int Slot, ValueType Type, LocalDeclaration? Seed);
 
-internal sealed record InstanceRecordPlan(string Tag, int Slot, Prop[] Props, HydrationState[] States, string Source, bool ForwardsAttributes)
+internal sealed record InstanceRecordPlan(string Tag, int Slot, Prop[] Props, HydrationState[] States, string Source, bool ForwardsAttributes, int DeclarationContextSlot)
 {
     public InstanceInputs Inputs(object?[] values) => (InstanceInputs)values[Slot]!;
 
@@ -48,7 +50,17 @@ internal sealed record InstanceRecordPlan(string Tag, int Slot, Prop[] Props, Hy
                 .ToDictionary(item => item.Name, item => item.Value, StringComparer.Ordinal),
             ["state"] = state
         };
-        if (initialized.Count > 0) record.Add("initialized", initialized.ToArray());
+        record.Add("initialized", initialized.ToArray());
+        if (DeclarationContextSlot >= 0 && values[DeclarationContextSlot] is DeclarationEvaluation { InputReady: { } ready })
+        {
+            Dictionary<string, object?>? availability = null;
+            for (var index = 0; index < ready.Length; index++) if (!ready[index])
+                (availability ??= new(StringComparer.Ordinal)).Add(Props[index].Name, new Dictionary<string, object?>
+                {
+                    ["ready"] = false, ["pending"] = false, ["stale"] = false, ["error"] = null
+                });
+            if (availability is not null) record.Add("availability", availability);
+        }
         if (ForwardsAttributes)
         {
             var attributes = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -65,14 +77,27 @@ internal sealed record InstanceRecordPlan(string Tag, int Slot, Prop[] Props, Hy
         if (input.SerializedRoot is null)
         {
             var records = new Dictionary<string, object?>(StringComparer.Ordinal);
+            Dictionary<string, PreparedModuleRecord>? prepared = null;
             foreach (var parent in context.RootStyles())
-                if (parent.Style.Instance is { } instance) records.Add(instance.Tag, instance.Record(parent.Values, context));
+                if (parent.Style.Instance is { } instance)
+                {
+                    records.Add(instance.Tag, instance.Record(parent.Values, context));
+                    if (context.PreparedModule(instance.Inputs(parent.Values)) is { } module) (prepared ??= new(StringComparer.Ordinal)).Add(instance.Tag, module);
+                }
             records.Add(Tag, Record(values, context));
+            if (context.PreparedModule(input) is { } own) (prepared ??= new(StringComparer.Ordinal)).Add(Tag, own);
             input.SerializedRoot = HydrationRecords.Encode(records, Source, cancellation);
+            if (prepared is not null) context.RecordModuleBindings(input, PreparedModuleRecords.Encode(prepared, Source, cancellation));
         }
         writer.Write(" data-html-next-instance=\"");
         HtmlOutput.Escape(ref writer, input.SerializedRoot, true);
         writer.Write('"');
+        if (context.SerializedModuleBindings(input) is { } bindings)
+        {
+            writer.Write(" data-html-next-bindings=\"");
+            HtmlOutput.Escape(ref writer, bindings, true);
+            writer.Write('"');
+        }
     }
 }
 
@@ -81,9 +106,9 @@ internal sealed class InstanceInputs
     public List<string> Explicit { get; } = [];
     public Dictionary<string, object?> Values { get; } = new(StringComparer.Ordinal);
     public string? SerializedRoot { get; set; }
-    public void Add(string name, object? value, bool present, bool provided, string source = "value", bool producer = false)
+    public void Add(string name, object? value, bool present, bool provided, string source = "value", bool producer = false, bool explicitInput = true)
     {
-        if (present && value is not null && !ReferenceEquals(value, ExpressionValue.AbsentStorage)
+        if (explicitInput && present && value is not null && !ReferenceEquals(value, ExpressionValue.AbsentStorage)
             && (value is not ExpressionValue expression || !expression.IsNull && !expression.IsAbsent)) Explicit.Add(name);
         Values.Add(name, new Dictionary<string, object?> { ["value"] = value, ["source"] = source, ["present"] = present, ["provided"] = provided, ["producer"] = producer });
     }

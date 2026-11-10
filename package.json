@@ -29,7 +29,7 @@
     "report:performance": "pnpm --filter @nextwebwg/html-next report:performance",
     "test": "vitest run --config vitest.config.ts --exclude tests/package.test.ts",
     "build:dotnet": "dotnet build packages/html-next-dotnet/src/HtmlNext -c Release --nologo",
-    "test:dotnet": "dotnet test packages/html-next-dotnet/tests/HtmlNext.Tests -c Release --nologo && dotnet run --project packages/html-next-dotnet/benchmarks -c Release -- --validate && node scripts/test-dotnet-client.ts",
+    "test:dotnet": "dotnet test packages/html-next-dotnet/tests/HtmlNext.Tests -c Release --nologo && dotnet run --project packages/html-next-dotnet/benchmarks -c Release -- --validate && node scripts/test-dotnet-client.ts && node scripts/test-dotnet-package.ts",
     "measure:dotnet": "dotnet run --project packages/html-next-dotnet/benchmarks -c Release --",
     "measure:dotnet:node": "tsx packages/html-next-dotnet/benchmarks/node.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",

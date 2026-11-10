@@ -3654,6 +3654,8 @@ export function serializeRenderedForm(container: Element): string {
         copy.textContent = original.value;
         copy.setAttribute(FORM_DEFAULTS_ATTRIBUTE, JSON.stringify({ value: original.defaultValue }));
       }
+      // HTML parsing discards one LF immediately after a textarea start tag.
+      if (copy.firstChild?.nodeType === 3 && copy.firstChild.textContent?.startsWith("\n")) copy.prepend("\n");
     } else if (original instanceof HTMLSelectElement && copy instanceof HTMLSelectElement) {
       for (let optionIndex = 0; optionIndex < original.options.length; optionIndex += 1) {
         const option = original.options[optionIndex]!;

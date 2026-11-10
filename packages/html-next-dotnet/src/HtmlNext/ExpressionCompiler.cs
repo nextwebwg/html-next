@@ -149,7 +149,9 @@ internal sealed class ExpressionCompiler(string text, string source, IReadOnlyDi
             }
             else if (op is "<" or "<=" or ">" or ">=")
             {
-                Require(left, "number", "integer"); Require(right, "number", "integer"); result = ExpressionValue.BooleanType;
+                Require(left, "number", "integer", "string", "keyword"); Require(right, "number", "integer", "string", "keyword");
+                if (!Compatible(left.Type, right.Type)) Fail("Ordered comparison requires compatible operand types.");
+                result = ExpressionValue.BooleanType;
             }
             else result = ArithmeticType(op, left, right);
             left = Fold(op is "+" or "-" or "*" or "/" or "%" && left.Type.Kind is "number" or "integer" && right.Type.Kind is "number" or "integer"
@@ -291,13 +293,14 @@ internal sealed class ExpressionCompiler(string text, string source, IReadOnlyDi
         }
         else result = Unknown;
         if (target is PathExpression path && index >= 0)
-            return new PathExpression(new(path.Path.Slot, [..path.Path.Fields, index], result, [..path.Path.Keys ?? [], key], path.Path.RootType, path.Path.Declaration));
+            return new PathExpression(new(path.Path.Slot, [..path.Path.Fields, index], result, [..path.Path.Keys ?? [], key], path.Path.RootType, path.Path.Declaration, path.Path.InputContextSlot));
         return Fold(new MemberExpression(target, key, result));
     }
 
     private ValueExpression Call(string name, ValueExpression[] arguments)
     {
         LiteralOnly = false;
+        if (name is "format" or "formatParts" or "formatRange") return new FormattingExpression(name, arguments);
         var count = arguments.Length;
         var valid = name switch { "default" or "join" => count == 2, "abs" => count == 1, "round" => count is 1 or 2,
             "clamp" => count == 3, "concat" or "min" or "max" => count > 0, _ => false };

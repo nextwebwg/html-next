@@ -2231,6 +2231,7 @@ export function childOutlet(
         const made = kept ? (template.m as (dirty: Map<unknown, 1 | 2>, props: Record<string, unknown>, at?: Node) => ScopedRecord)(dirty, props, open)
           : template.m(dirty, props);
         if (made.n !== open) {
+          if (kept) clearRegion(open as Comment, close as Comment);
           for (const node of Array.from(made.n.childNodes)) markProjectedRoot(node);
           close.before(made.n);
         }

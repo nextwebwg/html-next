@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next",
-  "version": "1.0.0-alpha.92",
+  "version": "1.0.0-alpha.93",
   "description": "Reference runtime and tools for HTML Next: Declarative HTML Components, validity on any element, and HTML Forms request construction.",
   "license": "MIT",
   "keywords": [
@@ -118,7 +118,7 @@
     "@formatjs/intl-durationformat": "0.11.1",
     "dprint-plugin-malva": "^0.16.0",
     "dprint-plugin-markup": "^0.27.5",
-    "jsdom": "30.1.2",
+    "jsdom": "31.0.0",
     "parse5": "catalog:",
     "postcss": "catalog:",
     "postcss-nesting": "^14.0.3",

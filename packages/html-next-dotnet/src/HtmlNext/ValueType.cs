@@ -5,11 +5,12 @@ using System.Runtime.CompilerServices;
 
 namespace HtmlNext;
 
-internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.Field[]? Fields = null, string Path = "", bool Open = false, ValueConstraints? Constraints = null, bool Reference = false, ScopedSlotContract[]? ChildSources = null)
+internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.Field[]? Fields = null, string Path = "", bool Open = false, ValueConstraints? Constraints = null, bool Reference = false, ScopedSlotContract[]? ChildSources = null, SelectedType? Selection = null, bool Unconstrained = false)
 {
     private readonly ConcurrentDictionary<Type, ModelAccess.RecordReader>? readers = Kind == "object" ? new() : null;
     internal sealed record Field(string Name, ValueType Type, bool Optional = false);
     public bool NeedsSnapshot { get; } = Kind == "unknown" || Open || Item?.NeedsSnapshot == true || Fields?.Any(field => field.Type.NeedsSnapshot) == true;
+    internal bool Textual => Kind is "string" or "keyword" || DateValues.IsType(Kind);
     public bool HasAttributeForm => Kind is not ("unknown" or "event" or "null") && Item?.HasAttributeForm != false && Fields?.Any(member => !member.Type.HasAttributeForm) != true;
 
     public ValueType AsReference() => this with
@@ -21,7 +22,8 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
 
     public ExpressionValue CheckReference(ExpressionValue value)
     {
-        if (!Reference || value.IsNull || value.IsAbsent || value.IsInvalid || Kind == "unknown") return value;
+        if (!Reference || value.IsNull || value.IsAbsent || value.IsInvalid) return value;
+        if (Unconstrained || Kind == "unknown") return ReferenceValue(value);
         if (Kind is "object" or "list") return value.Type.Kind == Kind ? ReferenceValue(value) : ExpressionValue.Invalid;
         if (Kind is "length" or "percentage" or "duration" && value.IsText)
         {
@@ -30,6 +32,7 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
             return Dimensions.TryParse(text, out var dimension) && dimension.Type.Kind == Kind ? dimension : ExpressionValue.Invalid;
         }
         if (Kind is "string" or "keyword" && value.IsDimension) value = ExpressionValue.Text(value.ScalarText());
+        if (DateValues.IsType(Kind)) return value.IsText && DateValues.Valid(Kind, value.ScalarText()) ? new(this, value.Data) : ExpressionValue.Invalid;
         var valid = Kind switch
         {
             "string" => value.IsText,
@@ -42,14 +45,26 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
     }
 
     private static readonly ConditionalWeakTable<ValueType, ReferenceLayouts> ReferenceViews = new();
-    public ExpressionValue ReferenceValue(ExpressionValue value) => Reference && Kind is "object" or "list" && value.Type.Kind == Kind
-        ? new ExpressionValue(ReferenceLayout(value.Type), value.Data) : value;
+    public ExpressionValue ReferenceValue(ExpressionValue value)
+    {
+        if (!Reference) return value;
+        if (Unconstrained) return UnconstrainedValue(value);
+        return Kind is "object" or "list" && value.Type.Kind == Kind ? new ExpressionValue(ReferenceLayout(value.Type), value.Data) : value;
+    }
+
+    private ExpressionValue UnconstrainedValue(ExpressionValue value)
+    {
+        if (value.IsDimension) return ExpressionValue.Text(value.ScalarText());
+        return value.Type.Kind is "object" or "list" && !value.Type.Unconstrained
+            ? new ExpressionValue(ReferenceLayout(value.Type), value.Data) : value;
+    }
 
     private ValueType ReferenceLayout(ValueType actual) => ReferenceEquals(this, actual) ? this
         : ReferenceViews.GetValue(this, static owner => new ReferenceLayouts(owner)).Get(actual);
 
     private ValueType CreateReferenceLayout(ValueType actual)
     {
+        if (Unconstrained) return actual.AsUnconstrainedReference();
         if (Kind == "list") return new("list", Item!.ReferenceLayoutFor(actual.Item!), Reference: true);
         var fields = new Field[actual.Fields!.Length];
         for (var index = 0; index < fields.Length; index++)
@@ -61,7 +76,16 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
         return new("object", Fields: fields, Path: Path, Open: Open, Reference: true);
     }
 
-    private ValueType ReferenceLayoutFor(ValueType actual) => Reference && Kind is "object" or "list" && actual.Kind == Kind
+    private ValueType AsUnconstrainedReference() => this with
+    {
+        Reference = true, Unconstrained = true, Selection = null, Constraints = null, ChildSources = null,
+        Item = Item?.AsUnconstrainedReference(),
+        Fields = Fields?.Select(field => field with { Type = field.Type.AsUnconstrainedReference() }).ToArray()
+    };
+
+    private ValueType ReferenceLayoutFor(ValueType actual) => Unconstrained ? ReferenceLayout(actual)
+        : Kind == "unknown" && actual.Reference ? actual
+        : Reference && Kind is "object" or "list" && actual.Kind == Kind
         ? ReferenceLayout(actual) : this;
 
     private static readonly ValueType UnknownReference = new("unknown");
@@ -115,6 +139,7 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
         if (value is System.Text.Json.JsonElement json) value = ModelAccess.Unwrap(json);
         if (Kind == "string" && value is string || Kind == "boolean" && value is bool) return value;
         if (Kind == "keyword" && value is string keyword && IsKeyword(keyword)) return keyword;
+        if (DateValues.IsType(Kind) && value is string civil && DateValues.Valid(Kind, civil)) return civil;
         if (Kind is "length" or "percentage" or "duration" && value is string dimension
             && (Kind == "length" && dimension == "0" || Dimensions.TryParse(dimension, out var quantity) && quantity.Type.Kind == Kind)) return dimension;
         if (Kind is "number" or "integer" && value is double scalar && double.IsFinite(scalar) && (Kind != "integer" || Math.Truncate(scalar) == scalar)) return value;
@@ -204,7 +229,7 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
     public object? BindExpression(ExpressionValue value, string source, CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();
-        if (Kind == "unknown") return value.Store();
+        if (Kind == "unknown") return (Unconstrained ? UnconstrainedValue(value) : value).Store();
         if (Kind == "list" && value.Type.Kind == "list")
         {
             var items = new object?[value.Count];
@@ -297,7 +322,8 @@ internal sealed record ValueType(string Kind, ValueType? Item = null, ValueType.
         {
             var kind = Name();
             if (javaScriptValues && kind is "event" or "null") return new(kind);
-            if (kind is "string" or "number" or "integer" or "boolean" or "keyword" or "length" or "percentage" or "duration" or "unknown") return new(kind);
+            if (DateValues.IsType(kind)) return new(kind);
+            if (kind is "string" or "number" or "integer" or "boolean" or "keyword" or "length" or "percentage" or "duration" or "unknown") return new(kind, Unconstrained: kind == "unknown");
             if (kind == "list")
             {
                 Expect('(');

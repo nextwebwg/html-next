@@ -104,6 +104,8 @@ jobs:
       - run: dotnet test packages/html-next-dotnet/tests/HtmlNext.Tests -c Release --no-restore --nologo
       - run: dotnet restore packages/html-next-dotnet/benchmarks --locked-mode
       - run: dotnet run --project packages/html-next-dotnet/benchmarks -c Release --no-restore -- --validate
+      - name: Verify the installed NuGet package
+        run: node scripts/test-dotnet-package.ts
       - name: Adopt native output in Chromium, Firefox and WebKit
         env:
           HTMLNEXT_BROWSER_TEST: "1"

@@ -37,6 +37,27 @@ public sealed class InterfaceDeclarationTests
         Assert.Matches(new Regex(reason, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant), error.Detail);
     }
 
+    [Theory]
+    [InlineData("onclick")]
+    [InlineData("on:click")]
+    [InlineData("nonce")]
+    [InlineData("blocking")]
+    [InlineData("pattern")]
+    [InlineData("nullable")]
+    [InlineData("$if")]
+    [InlineData("from:value")]
+    public void AnnotationsDoNotHideExecutableAttributesOrUnsupportedDeclarations(string attribute)
+    {
+        var prop = $"<prop name=\"value\" type=\"string\" {attribute}=\"x\">Value.</prop>";
+        foreach (var declaration in new[] { prop, $"<prop name=\"record\" type=\"object\">Record.{prop}</prop>" })
+        {
+            var source = $"<template component=\"x-interface\"><defs>{declaration}</defs><output>Ready</output></template>";
+            var error = Assert.Throws<HtmlNextException>(() => HtmlNextCompiler.Compile(source, "annotations.html"));
+            Assert.Equal("annotations.html", error.SourceName);
+            Assert.Contains(attribute, error.Detail);
+        }
+    }
+
     public sealed class UnreadInterface
     {
         public object ready => throw new InvalidOperationException("Event metadata was bound as input.");

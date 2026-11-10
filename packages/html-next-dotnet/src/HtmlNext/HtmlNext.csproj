@@ -1,5 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>NextWebWG.HtmlNext</PackageId>
+    <Version>1.0.0-alpha.1</Version>
+    <Authors>Next Web Working Group</Authors>
+    <Description>Compile HTML Next component templates once and render initial HTML from .NET application data, with metadata for matching browser-module hydration.</Description>
+    <PackageProjectUrl>https://github.com/nextwebwg/html-next/tree/main/packages/html-next-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/nextwebwg/html-next</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>html;templates;ssr;components</PackageTags>
+  </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="AngleSharp" Version="1.9.1" />
+    <None Include="../../README.md" Pack="true" PackagePath="README.md" />
+    <PackageReference Include="AngleSharp" Version="1.10.0" />
+    <PackageReference Include="AngleSharp.Css" Version="1.4.1" />
   </ItemGroup>
 </Project>

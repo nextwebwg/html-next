@@ -23,11 +23,22 @@ internal sealed class LocalDeclaration(string name, int slot, int index, int con
     public object? Read(object?[] values) => ((DeclarationEvaluation)values[ContextSlot]!).Read(this);
 }
 
-internal sealed class DeclarationEvaluation(object?[] values, int count, string source, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic)
+internal sealed class DeclarationEvaluation(object?[] values, int count, string source, CancellationToken cancellation, Action<HtmlNextDiagnostic>? onDiagnostic, bool[]? inputReady = null)
 {
     // 0: unread, 1: evaluating, 2: available, 3: unavailable.
     private readonly byte[] status = new byte[count];
     public bool Ready { get; set; } = true;
+    public bool[]? InputReady { get; } = inputReady;
+    public void ObserveInput(int slot) { if (InputReady is { } inputs) Ready &= inputs[slot]; }
+    public void RefreshWaiting(LocalDeclaration[] declarations)
+    {
+        foreach (var declaration in declarations)
+            if (declaration.SeedType is null || status[declaration.Index] != 2)
+            {
+                status[declaration.Index] = 0;
+                values[declaration.Slot] = declaration;
+            }
+    }
     public bool Initialized(LocalDeclaration declaration) => status[declaration.Index] == 2;
 
     public object? Read(LocalDeclaration declaration)
@@ -112,6 +123,21 @@ internal static class StateSeedCopy
     private static object? Copy(object? value, string source, CancellationToken cancellation, Dictionary<object, object>? seen)
     {
         cancellation.ThrowIfCancellationRequested();
+        if (value is ExpressionValue { Data: AcceptedChildEntry entry })
+        {
+            var fields = entry.Type.Fields!;
+            var type = fields.Any(field => field.Type.Selection is not null)
+                ? entry.Type with { Fields = fields.Select(field => field.Type.Selection is null
+                    ? field : field with { Type = new("unknown", Path: field.Type.Path) }).ToArray() }
+                : entry.Type;
+            seen ??= new(ReferenceEqualityComparer.Instance);
+            if (seen.TryGetValue(entry.Child, out var previousEntry)) return new ExpressionValue(type, previousEntry);
+            ExecutionStack.Check(source);
+            var copiedEntry = new object?[fields.Length];
+            seen.Add(entry.Child, copiedEntry);
+            for (var index = 0; index < copiedEntry.Length; index++) copiedEntry[index] = Copy(entry.Child[index], source, cancellation, seen);
+            return new ExpressionValue(type, copiedEntry);
+        }
         if (value is ExpressionValue aggregate)
             return new ExpressionValue(aggregate.Type, Copy(aggregate.Data, source, cancellation, seen), aggregate.Number, aggregate.Written).Store();
         if (value is not (object?[] or ExpressionValue[])) return value;

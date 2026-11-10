@@ -2,10 +2,11 @@ namespace HtmlNext;
 
 internal sealed record RootStyleState(string Name, ValueExpression Read);
 
-internal sealed record RootStyle(string Tag, RootStyleState[] States, string Source, string[]? AuthoredIdentity = null, InstanceRecordPlan? Instance = null) : RenderOperation
+internal sealed record RootStyle(string Tag, RootStyleState[] States, string Source, string[]? AuthoredIdentity = null, InstanceRecordPlan? Instance = null, PropReflectionPlan? Reflection = null) : RenderOperation
 {
     private readonly string stateAttribute = "data-" + Tag + "-state";
-    public bool Manages(string attribute) => States.Length > 0 && attribute == stateAttribute;
+    public bool Manages(string attribute, object?[] values, RenderContext? context) => States.Length > 0 && attribute == stateAttribute
+        || context?.Interactive == true && Reflection?.Manages(attribute, values) == true;
 
     public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellationToken)
     {
@@ -19,6 +20,11 @@ internal sealed record RootStyle(string Tag, RootStyleState[] States, string Sou
         writer.Write('"');
         if (context is not null) foreach (var parent in context.RootStyles()) parent.Style.WriteStates(ref writer, parent.Values);
         WriteStates(ref writer, values);
+        if (context?.Interactive == true)
+        {
+            foreach (var parent in context.RootStyles()) parent.Style.Reflection?.Write(ref writer, parent.Values, cancellationToken);
+            Reflection?.Write(ref writer, values, cancellationToken);
+        }
         if (context?.Interactive == true) Instance?.Write(ref writer, values, context, cancellationToken);
     }
 
@@ -36,7 +42,7 @@ internal sealed record RootStyle(string Tag, RootStyleState[] States, string Sou
         var started = false;
         foreach (var state in States)
         {
-            var value = state.Read.Evaluate(values);
+            var value = state.Read.EvaluateUnchecked(values);
             var text = value.Data as string;
             if (text is null && value.IsDimension) text = value.ScalarText();
             var scalar = text is not null || value.IsNumeric;
@@ -82,8 +88,8 @@ internal sealed record RootAuthoredAttribute(string Name, RenderOperation Attrib
 {
     public override void Write(ref HtmlWriter writer, object?[] values, CancellationToken cancellationToken)
     {
-        if (Owner.Manages(Name)) return;
-        if (writer.Context is { } context) foreach (var parent in context.RootStyles()) if (parent.Style.Manages(Name)) return;
+        if (Owner.Manages(Name, values, writer.Context)) return;
+        if (writer.Context is { } context) foreach (var parent in context.RootStyles()) if (parent.Style.Manages(Name, parent.Values, context)) return;
         Attribute.Write(ref writer, values, cancellationToken);
     }
 }

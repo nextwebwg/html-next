@@ -1,9 +1,11 @@
 namespace HtmlNext;
 
-internal sealed class AcceptedChildEntry(ExpressionValue value, string tag, object?[] owner, ProjectionFrame[] frames)
+internal sealed class AcceptedChildEntry(ExpressionValue value, string tag, object?[] owner, ProjectionFrame[] frames, int index)
 {
-    public ExpressionValue Value { get; } = value;
+    public ExpressionValue Value => new(value.Type, this);
     public string Tag { get; } = tag;
+    public int Index { get; } = index;
+    public ValueType Type => value.Type;
     public object?[] Child { get; } = (object?[])value.Data!;
     public object?[] Owner { get; } = owner;
     public ProjectionFrame Frame => frames[^1];
@@ -49,7 +51,7 @@ internal sealed record BorrowedSlotOutlet(ValueExpression Of, IReadOnlyDictionar
         try
         {
             var outlet = Outlet(entry);
-            if (deferred) outlet.WriteDeferred(ref writer, values, cancellation); else outlet.Write(ref writer, values, cancellation);
+            outlet.WriteBorrowed(ref writer, values, cancellation, deferred, entry.Index);
         }
         finally { context.LeaveProjection(previous); }
     }

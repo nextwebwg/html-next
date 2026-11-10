@@ -100,6 +100,7 @@ export interface HtmlNextServerAssets {
   readonly sources: readonly { readonly source: string; readonly kind: "component" | "stylesheet"; readonly sha256: string }[];
   readonly stateNames: Readonly<Record<string, readonly string[]>>;
   readonly stylesheets: readonly string[];
+  readonly preparedModules: readonly { readonly tag: string; readonly source: string }[];
 }
 
 export interface HtmlNextBuildManifest {
@@ -557,7 +558,9 @@ async function compileGraph(options: HtmlNextNativePluginOptions, collectDiagnos
     manifest: Object.freeze({
       server: Object.freeze({ version: 1, hydrate: options.hydrate === true, hasStyles: graphStyleAssets.css !== "",
         sources: Object.freeze([...sourceRecords.values()].sort((a, b) => a.source.localeCompare(b.source) || a.kind.localeCompare(b.kind))),
-        stateNames: graphStyleAssets.stateNames, stylesheets: Object.freeze([]) }),
+        stateNames: graphStyleAssets.stateNames, stylesheets: Object.freeze([]),
+        preparedModules: Object.freeze(prepared.map(({ definition, modulePreparation }) => Object.freeze({
+          tag: definition.contract.tag, source: modulePreparation!.source }))) }),
       mode: "native-application-or-library-build",
       delivery,
       client: Object.freeze({ ...client, module: hydrationModule }),

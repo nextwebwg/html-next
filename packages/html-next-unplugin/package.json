@@ -1,6 +1,6 @@
 {
   "name": "@nextwebwg/html-next-unplugin",
-  "version": "1.0.0-alpha.92",
+  "version": "1.0.0-alpha.93",
   "description": "unplugin and Vite build pipeline for Declarative HTML Components.",
   "license": "MIT",
   "type": "module",
@@ -29,8 +29,8 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.92",
-    "@nextwebwg/html-next-converter": "workspace:>=1.0.0-alpha.92",
+    "@nextwebwg/html-next": "workspace:>=1.0.0-alpha.93",
+    "@nextwebwg/html-next-converter": "workspace:>=1.0.0-alpha.93",
     "css-tree": "catalog:",
     "cssstyle": "catalog:",
     "magic-string": "catalog:",
@@ -56,7 +56,7 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "6.1.2",
     "@vitejs/plugin-vue": "6.0.10",
-    "jsdom": "30.1.2",
+    "jsdom": "31.0.0",
     "playwright": "catalog:",
     "preact": "11.1.0",
     "preact-render-to-string": "6.8.2",

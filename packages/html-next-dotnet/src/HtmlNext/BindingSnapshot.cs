@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace HtmlNext;
 
 /// <summary>Request-local snapshots for untyped fields; declared closed shapes keep their direct binding path.</summary>
-internal sealed class BindingSnapshot(string source, CancellationToken cancellation)
+internal sealed class BindingSnapshot(string source, CancellationToken cancellation, bool transferable = false)
 {
     private Dictionary<object, object>? seen;
     private static readonly ValueType Unknown = new("unknown");
@@ -13,6 +13,12 @@ internal sealed class BindingSnapshot(string source, CancellationToken cancellat
     public object? Capture(object? value)
     {
         cancellation.ThrowIfCancellationRequested();
+        if (ReferenceEquals(value, ExpressionValue.AbsentStorage) || ReferenceEquals(value, ExpressionValue.InvalidStorage)) return value;
+        if (transferable && value is Delegate or System.Reflection.MemberInfo or Task or Stream or System.Numerics.BigInteger
+            or DateTime or DateTimeOffset or DateOnly or TimeOnly or TimeSpan or Guid or Uri)
+            throw new HtmlNextException("HNCS008", "Prepared inputs require plain serializable data, not opaque or executable values.", source);
+        if (transferable && value is IDictionary dictionary && dictionary.Keys.Cast<object?>().Any(key => key is not string))
+            throw new HtmlNextException("HNCS008", "Prepared input records require string member names.", source);
         if (value is JsonElement json) value = ModelAccess.Unwrap(json);
         if (value is null or string or bool or ExpressionValue || value.GetType().IsPrimitive || value is decimal) return value;
         seen ??= new(ReferenceEqualityComparer.Instance);

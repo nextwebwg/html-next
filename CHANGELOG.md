@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.0.0-alpha.93
+
+- Package the native .NET renderer as `NextWebWG.HtmlNext` `1.0.0-alpha.1`, with NuGet metadata and an installed-package consumer check.
+
+- Document the local .NET consumer and matching Vite hydration build, and align initial-rendering coverage and remaining limitations with the native tests.
+
+- Preserve leading newlines in native authored and interpolated textarea content through HTML parsing, using the same initial-text serializer as `.value` bindings.
+
+- Remove stale server content when a borrowed scoped-slot callback creates a fresh rendering during adoption, preventing duplicate cell content.
+
+- Match native rendered trees to generated browser prototypes by omitting authored comments and non-rendering table/SVG whitespace. Preserve early edits and table rows during adoption.
+
+- Record accepted native parent bindings as caller-provided inputs. Reserve producer ownership for completed module reads.
+
+- Serialize native textarea `.value` bindings as initial text content with authored reset defaults. Preserve leading newlines through Node's textarea HTML serialization.
+
+- Serialize native input `.value` bindings into initial HTML and preserve authored reset defaults in the existing client records. Compose ordered attributes, invocation forwarding and `.checked` records; let browser parsing normalize control values.
+
+- Let native module preparation read accepted props, seeded state, computed values and availability lazily, and exchange completed values and input identities with JavaScript SDK services. Expose the input-port adapter through the public inputs entry point.
+
+- Record explicit accepted native props in the existing SDK metadata attributes, including components pruned from client adoption. Preserve omitted defaults, null inputs, delegated ownership and structured JSON values.
+
+- Serialize native input `.checked` bindings as initial checkedness and preserve authored reset defaults through the existing browser-adoption records. Keep invalid property writes inert and compose reset attributes with invocation forwarding.
+
+- Keep a receiving native prop's default available when a binding reads a missing member of an available object. Preserve waiting upstream inputs and seed dependent state before rendering and browser adoption.
+
+- Compile server-owned application carriers against a retained native component graph. Reuse typed component and slot contracts, compiled plans, matching assets and client selection across independent application compilations.
+
+- Render keyed native styles in authored order with whole-style writes, invocation forwarding and consumed style props. Preserve shorthand priorities, empty custom properties and invalid-write retention; update Node's DOM implementation to preserve those values during server rendering and adoption.
+
+- Format native duration records and CSS durations with ICU unit labels, digital groups and structured parts. Preserve fractional precision, single-sign output and native bidirectional isolation during browser adoption.
+
+- Render native display names and precision-aware plural messages through ICU. Respect missing-name fallbacks, normalize language identifiers, substitute every message marker as text and preserve output nodes during browser adoption.
+
+- Format native string lists and relative offsets through ICU, including locale list styles, named relative phrases and structured parts with normalized units. Keep adjacent list elements separate when the locale uses no separator.
+
+- Bind native date and time prop types and format civil values and instants through ICU. Preserve locale-specific fields, styles, calendars, hour cycles, time zones, parts and historical ranges, and carry typed strings through browser adoption.
+
+- Render native numeric `format`, `formatParts` and `formatRange` expressions through ICU, including currency, percentages, units, precision, signs and notation. Use the current request culture when the locale is omitted, and require selected types to agree before inferring a formatter.
+
+- Read native declaration groups before or after the markup root, and compare string and keyword values in ordinal UTF-16 order without numeric coercion.
+- Compile native select options, projected fallbacks and structural content into retained render plans. Use AngleSharp's token callbacks to preserve select children during source parsing, including comments, raw text, authored placeholder names and foreign namespaces.
+- Keep native state seeds waiting for omitted or refused props, carry readiness through component bindings, and preserve that ownership through browser adoption.
+- Preserve accepted-child borrowed slot ownership in native rendered markers so generated clients reclaim the original controls after reopening an outlet.
+- Check native dependent prop defaults against the current selected type when expressions read them. Preserve valid sibling fields and raw prop values in adoption records and CSS prop selectors, and accept structured literal null inputs without a type diagnostic.
+- Ignore inert authoring annotations on native prop declarations and expanded fields while retaining declaration validation.
+- Check native accepted-child references against each child's active selected type, including mixed lists and aliases. Keep borrowed slot ownership and ordinary state-copy behavior when entries contain dependent props.
+- Include compiler-owned prepared-module source revisions in server manifests and expose them to native .NET applications.
+- Apply request-scoped prepared module values in the native renderer and transfer completed read identities through the existing browser bindings. Preserve caller inputs and initialized drafts, and complete waiting state seeds when their inputs become available.
+
 ## 1.0.0-alpha.92
 
 ### Breaking

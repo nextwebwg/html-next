@@ -57,6 +57,7 @@ describe("HTML Next unplugin", () => {
     assert.equal(manifest.server.hasStyles, true);
     assert.deepEqual(manifest.server.stylesheets, ["components.css"]);
     assert.deepEqual(manifest.server.stateNames, { "ui-poster": ["active"] });
+    assert.deepEqual(manifest.server.preparedModules, []);
     assert.deepEqual(manifest.server.sources, [{ source: "poster.html", kind: "component", sha256: createHash("sha256").update(source).digest("hex") }]);
   });
 
@@ -288,6 +289,7 @@ describe("HTML Next unplugin", () => {
     const alias = { ...generatedRuntimeAlias, "@nextwebwg/html-next/bindings": new URL("../../html-next/src/bindings.ts", import.meta.url).pathname };
     await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries, hydrate: true })], resolve: { alias },
       build: { minify: false, lib: { entry: join(root, "client.js"), formats: ["iife"], name: "PreparedFixture", cssFileName: "components", fileName: () => "app.js" } } });
+    const manifest = JSON.parse(await readFile(join(root, "dist/html-next.manifest.json"), "utf8"));
     await build({ root, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries, hydrate: true })], resolve: { alias },
       build: { ssr: join(root, "server.js"), outDir: join(root, "server"), minify: false, rolldownOptions: { output: { entryFileNames: "prepare.mjs" } } } });
     const definitions = [parseComponent(source, pathToFileURL(join(root, "prepared.html")).href), ...nested ? [parseComponent(parent.slice(parent.indexOf("<template")), pathToFileURL(join(root, "wrapper.html")).href), parseComponent(box, pathToFileURL(join(root, "box.html")).href)] : []];
@@ -300,6 +302,14 @@ describe("HTML Next unplugin", () => {
       const rows = [...element.querySelectorAll("li")];
       assert.deepEqual(rows.map(row => row.textContent), nested ? ["2:0:2", "2:1:2"] : ["2:0:0", "2:1:0"]);
       assert.ok(element.hasAttribute("data-html-next-bindings"));
+      assert.deepEqual(manifest.server.preparedModules.map((item: { tag: string }) => item.tag).sort(),
+        nested ? ["ui-prepared", "ui-prepared-wrapper"] : ["ui-prepared"]);
+      for (const root of window.document.querySelectorAll("[data-html-next-bindings]")) {
+        for (const [tag, frame] of Object.entries(JSON.parse(root.getAttribute("data-html-next-bindings")!))) {
+          assert.equal(manifest.server.preparedModules.find((item: { tag: string }) => item.tag === tag).source, (frame as unknown[])[1],
+            "server metadata carries the exact completion revision consumed by browser adoption");
+        }
+      }
       window.eval(await readFile(join(root, "dist/app.js"), "utf8"));
       const fixture = window as unknown as { PreparedFixture: { mount(root: Element): Element }; preparedReads?: number; preparedAdoptionInputs: { tag: string; filters: string[] }[] };
       assert.equal(fixture.PreparedFixture.mount(element), element);

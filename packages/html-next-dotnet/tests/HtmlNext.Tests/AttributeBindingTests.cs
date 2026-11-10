@@ -1,4 +1,5 @@
 using HtmlNext;
+using AngleSharp.Html.Parser;
 using System.Text.Json;
 using Xunit;
 
@@ -6,6 +7,108 @@ namespace HtmlNext.Tests;
 
 public sealed class AttributeBindingTests
 {
+    [Theory]
+    [InlineData("true", false, true)]
+    [InlineData("false", false, false)]
+    [InlineData("true", true, true)]
+    [InlineData("false", true, false)]
+    [InlineData("null", true, false)]
+    [InlineData("''", true, false)]
+    [InlineData("0", true, false)]
+    [InlineData("'false'", false, true)]
+    [InlineData("[]", false, true)]
+    [InlineData("{}", false, true)]
+    [InlineData("1 / 0", true, true)]
+    [InlineData("1 / 0", false, false)]
+    public void NativeCheckedPropertiesSerializeLiveValuesAndPreserveAuthoredResetDefaults(string expression, bool authored, bool expected)
+    {
+        var template = Compile("<input type=\"checkbox\"" + (authored ? " checked=\"authored\"" : "") + " .checked=\"" + expression + "\">");
+        var html = template.Render();
+        using var writer = new StringWriter();
+        template.Write(writer);
+        Assert.Equal(html, writer.ToString());
+        var input = new HtmlParser().ParseDocument(html).QuerySelector("input")!;
+        Assert.False(input.HasAttribute(".checked"));
+        Assert.Equal(expected, input.HasAttribute("checked"));
+        var defaults = input.GetAttribute("data-html-next-form-defaults");
+        if (authored != expected)
+        {
+            using var record = JsonDocument.Parse(Assert.IsType<string>(defaults));
+            Assert.Equal(authored, record.RootElement.GetProperty("checked").GetBoolean());
+        }
+        else Assert.Null(defaults);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void ForwardedCheckedAttributesRemainResetDefaultsForNativePropertyBindings(bool active, bool authored)
+    {
+        var source = """
+            <template component="x-toggle" noforward><defs><prop name="active" type="boolean" default="false">Active.</prop></defs>
+            <input type="checkbox" .checked="$active" $attributes></template>
+            <template component="x-parent"><defs><prop name="active" type="boolean" default="false">Active.</prop></defs>
+            <main><x-toggle from:active="$active"
+            """ + (authored ? " checked=\"outside\"" : "") + "></x-toggle></main></template>";
+        var template = HtmlNextCompiler.CompileResource(source).Template("x-parent");
+        var html = template.Render(new { active });
+        using var writer = new StringWriter(); template.Write(writer, new { active });
+        Assert.Equal(html, writer.ToString());
+        var input = new HtmlParser().ParseDocument(html).QuerySelector("input")!;
+        Assert.False(input.HasAttribute(".checked"));
+        Assert.Equal(active, input.HasAttribute("checked"));
+        var defaults = input.GetAttribute("data-html-next-form-defaults");
+        if (active != authored)
+        {
+            using var record = JsonDocument.Parse(Assert.IsType<string>(defaults));
+            Assert.Equal(authored, record.RootElement.GetProperty("checked").GetBoolean());
+        }
+        else Assert.Null(defaults);
+    }
+
+    [Theory]
+    [InlineData(true, ".checked=\"$active\" from:checked=\"not($active)\"")]
+    [InlineData(false, ".checked=\"$active\" from:checked=\"not($active)\"")]
+    [InlineData(true, "from:checked=\"not($active)\" .checked=\"$active\"")]
+    [InlineData(false, "from:checked=\"not($active)\" .checked=\"$active\"")]
+    public void CheckedPropertyWritesKeepLaterAttributeWritesAsResetDefaults(bool active, string attributes)
+    {
+        var template = Compile("<input type=\"checkbox\" " + attributes + ">",
+            "<prop name=\"active\" type=\"boolean\" default=\"false\">Active.</prop>");
+        var html = template.Render(new { active });
+        using var writer = new StringWriter(); template.Write(writer, new { active });
+        Assert.Equal(html, writer.ToString());
+        var input = new HtmlParser().ParseDocument(html).QuerySelector("input")!;
+        Assert.Equal(active, input.HasAttribute("checked"));
+        using var defaults = JsonDocument.Parse(input.GetAttribute("data-html-next-form-defaults")!);
+        Assert.Equal(!active, defaults.RootElement.GetProperty("checked").GetBoolean());
+    }
+
+    [Fact]
+    public async Task CheckedPropertyRecordsStayLocalToRepeatedInputsAndConcurrentRequests()
+    {
+        var template = Compile("<form><input type=\"checkbox\" $each=\"item of $items\" .checked=\"$item\"></form>",
+            "<prop name=\"items\" type=\"list(boolean)\">Items.</prop>");
+        await Task.WhenAll(Enumerable.Range(0, 12).Select(index => Task.Run(() =>
+        {
+            var items = new[] { index % 2 == 0, index % 2 != 0 };
+            var html = template.Render(new { items });
+            using var writer = new StringWriter(); template.Write(writer, new { items });
+            Assert.Equal(html, writer.ToString());
+            var controls = new HtmlParser().ParseDocument(html).QuerySelectorAll("input");
+            Assert.Equal(items, controls.Select(input => input.HasAttribute("checked")));
+            Assert.Equal(items, controls.Select(input => input.HasAttribute("data-html-next-form-defaults")));
+        })));
+    }
+
+    [Theory]
+    [InlineData("<template component=\"x-parent\"><button .checked=\"true\">Button</button></template>")]
+    [InlineData("<template component=\"x-parent\"><x-toggle .checked=\"true\"></x-toggle></template><template component=\"x-toggle\"><input type=\"checkbox\"></template>")]
+    public void NativeCheckedPropertiesRequireANativeInput(string source) =>
+        Assert.Throws<HtmlNextException>(() => HtmlNextCompiler.CompileResource(source, "checked.html"));
+
     public static IEnumerable<object[]> SharedFixtures()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "attribute-bindings.json")));

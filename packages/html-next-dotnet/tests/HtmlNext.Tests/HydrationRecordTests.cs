@@ -41,6 +41,126 @@ public sealed class HydrationRecordTests
         Assert.Null(new HtmlParser().ParseDocument(template.Render()).QuerySelector("[data-html-next-instance]"));
     }
 
+    [Theory]
+    [InlineData("omitted", false)]
+    [InlineData("null", true)]
+    [InlineData("value", true)]
+    [InlineData("invalid", false)]
+    [InlineData("default", true)]
+    [InlineData("nested-omitted", false)]
+    [InlineData("nested-invalid", false)]
+    [InlineData("nested-default", false)]
+    public void PreservesInputReadinessBeforeClaimingAStateSeed(string input, bool initialized)
+    {
+        var nested = input.StartsWith("nested-", StringComparison.Ordinal);
+        if (nested) input = input[7..];
+        var source = "<template component=\"x-card\"><defs><prop name=\"rows\" type=\"list(string)\""
+            + (input == "default" ? " default=\"[]\"" : "")
+            + ">Rows.</prop><state name=\"draft\" type=\"list(string)\" from=\"$rows\"></state></defs><article><output>{$draft.length}</output></article></template>"
+            + (nested ? "<template component=\"x-static\"><defs><prop name=\"rows\" type=\"list(string)\">Rows.</prop></defs><main><x-card from:rows=\"$rows\"></x-card></main></template>" : "<template component=\"x-static\"><p>Static</p></template>");
+        object? inputs = input switch { "null" => new { rows = (object?)null }, "value" => new { rows = new[] { "One" } }, "invalid" => new { rows = "wrong" }, _ => null };
+        var template = Graph(source).Template(nested ? "x-static" : "x-card");
+        var html = template.Render(inputs, options: new() { Interactive = true });
+        using var writer = new StringWriter();
+        template.Write(writer, inputs, options: new() { Interactive = true });
+        Assert.Equal(html, writer.ToString());
+        var record = Records(html).GetProperty("x-card");
+        Assert.Equal(initialized ? new[] { "draft" } : [], record.GetProperty("initialized").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(!initialized, record.TryGetProperty("availability", out var availability));
+        if (!initialized)
+        {
+            var status = availability.GetProperty("rows");
+            Assert.False(status.GetProperty("ready").GetBoolean());
+            Assert.False(status.GetProperty("pending").GetBoolean());
+            Assert.False(status.GetProperty("stale").GetBoolean());
+            Assert.Equal(JsonValueKind.Null, status.GetProperty("error").ValueKind);
+        }
+    }
+
+    [Theory]
+    [InlineData("$name", "Provided")]
+    [InlineData("$draft", "Provided")]
+    [InlineData("null", "Default")]
+    public void ParentBindingsRemainCallerProvidedRatherThanModuleProduced(string expression, string accepted)
+    {
+        var source = """
+            <template component="x-card"><defs><prop name="title" type="string" default="Default">Title.</prop></defs><article><input from:value="$title"></article></template>
+            <template component="x-static"><defs><prop name="name" type="string" default="Provided">Name.</prop><state name="draft" type="string" from="$name"></state></defs><main><x-card from:title="EXPRESSION"></x-card></main></template>
+            """.Replace("EXPRESSION", expression, StringComparison.Ordinal);
+        var html = Graph(source).Template("x-static").Render(options: new() { Interactive = true });
+        var record = Records(html).GetProperty("x-card");
+        Assert.Equal(accepted, record.GetProperty("props").GetProperty("title").GetString());
+        var input = record.GetProperty("inputs").GetProperty("title");
+        Assert.True(input.GetProperty("provided").GetBoolean());
+        Assert.False(input.GetProperty("producer").GetBoolean());
+        Assert.Equal("value", input.GetProperty("source").GetString());
+    }
+
+    [Theory]
+    [InlineData("missing", "Fallback")]
+    [InlineData("null", "Fallback")]
+    [InlineData("empty", "")]
+    [InlineData("value", "Provided")]
+    public void AnAvailableMemberBindingKeepsTheReceivingDefaultReady(string input, string expected)
+    {
+        var source = """
+            <template component="x-card"><defs>
+            <prop name="title" type="string" default="Fallback">Title.</prop>
+            <state name="draft" type="string" from="$title"></state>
+            <computed name="blank" from="$title = ''"></computed>
+            </defs><article from:aria-hidden="$blank"><output>{$draft}</output></article></template>
+            <template component="x-static"><defs><prop name="data" type="object" open>Data.</prop></defs>
+            <main><x-card from:title="$data.title"></x-card></main></template>
+            """;
+        var data = new Dictionary<string, object?>();
+        if (input != "missing") data.Add("title", input switch { "null" => null, "empty" => "", _ => "Provided" });
+        var template = Graph(source).Template("x-static");
+        var inputs = new { data };
+        var inertRoot = new HtmlParser().ParseDocument(template.Render(inputs)).QuerySelector("article")!;
+        Assert.Equal(expected, inertRoot.QuerySelector("output")!.TextContent);
+        Assert.Equal(expected.Length == 0 ? "true" : "false", inertRoot.GetAttribute("aria-hidden"));
+        var html = template.Render(inputs, options: new() { Interactive = true });
+        using var writer = new StringWriter();
+        template.Write(writer, inputs, options: new() { Interactive = true });
+        Assert.Equal(html, writer.ToString());
+        var root = new HtmlParser().ParseDocument(html).QuerySelector("article")!;
+        var record = Records(root.OuterHtml).GetProperty("x-card");
+        Assert.Equal(expected, root.QuerySelector("output")!.TextContent);
+        Assert.Equal(new[] { "draft" }, record.GetProperty("initialized").EnumerateArray().Select(item => item.GetString()));
+        Assert.False(record.TryGetProperty("availability", out _));
+        Assert.Equal(expected, record.GetProperty("props").GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public void ARefusedBindingKeepsItsValidLiteralFallbackAvailable()
+    {
+        var source = """
+            <template component="x-card"><defs><prop name="rows" type="list(string)">Rows.</prop><state name="draft" type="list(string)" from="$rows"></state></defs><article><output>{$draft.length}</output></article></template>
+            <template component="x-static"><defs><state name="raw" value="wrong"></state></defs><main><x-card rows='["Literal"]' from:rows="$raw"></x-card></main></template>
+            """;
+        var record = Records(Graph(source).Template("x-static").Render(options: new() { Interactive = true })).GetProperty("x-card");
+        Assert.Equal(new[] { "draft" }, record.GetProperty("initialized").EnumerateArray().Select(item => item.GetString()));
+        Assert.False(record.TryGetProperty("availability", out _));
+        Assert.Equal("Literal", record.GetProperty("state").GetProperty("draft")[0].GetString());
+        var input = record.GetProperty("inputs").GetProperty("rows");
+        Assert.Equal("html", input.GetProperty("source").GetString());
+        Assert.Equal("[\"Literal\"]", input.GetProperty("value").GetString());
+        Assert.True(input.GetProperty("provided").GetBoolean());
+        Assert.False(input.GetProperty("producer").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("default($rows, [])")]
+    [InlineData("$choose ? $rows : []")]
+    public void ASeedObservesOnlyItsChosenInputPrerequisites(string expression)
+    {
+        var source = "<template component=\"x-card\"><defs><prop name=\"choose\" type=\"boolean\" default=\"false\">Choose.</prop><prop name=\"rows\" type=\"list(string)\">Rows.</prop>"
+            + "<state name=\"draft\" type=\"list(string)\" from=\"" + expression + "\"></state></defs><article><output>{$draft.length}</output></article></template><template component=\"x-static\"><p>Static</p></template>";
+        var record = Records(Graph(source).Template("x-card").Render(options: new() { Interactive = true })).GetProperty("x-card");
+        Assert.Equal(new[] { "draft" }, record.GetProperty("initialized").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(0, record.GetProperty("state").GetProperty("draft").GetArrayLength());
+    }
+
     [Fact]
     public void StreamsTheSameRecordsAndSnapshotsApplicationGettersOnce()
     {
@@ -59,6 +179,24 @@ public sealed class HydrationRecordTests
     {
         var html = Graph().Template("x-static").Render(options: new() { Interactive = true });
         Assert.Equal("<p component=\"x-static\">Static</p>", html);
+    }
+
+    [Fact]
+    public void KeepsRawDefaultsInRecordsWhileReferencesUseTheCurrentSelectedType()
+    {
+        var source = """
+            <template component="x-card"><defs>
+            <type name="input-value" from="mode"><option value="number" type="number"></option><option value="text" type="string"></option></type>
+            <prop name="value" type="input-value" default="3">Value.</prop>
+            <prop name="mode" type="keyword" values="number, text" default="number">Mode.</prop>
+            </defs><article><output>{$value}</output></article></template>
+            <template component="x-static"><p>Static</p></template>
+            """;
+        var html = Graph(source).Template("x-card").Render(new { mode = "text" }, options: new() { Interactive = true });
+        Assert.Equal("", new HtmlParser().ParseDocument(html).QuerySelector("output")!.TextContent);
+        var record = Records(html).GetProperty("x-card");
+        Assert.Equal(3, record.GetProperty("props").GetProperty("value").GetDouble());
+        Assert.False(record.GetProperty("inputs").GetProperty("value").GetProperty("present").GetBoolean());
     }
 
     [Fact]

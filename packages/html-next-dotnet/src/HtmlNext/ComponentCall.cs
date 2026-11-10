@@ -2,12 +2,32 @@ using System.Runtime.InteropServices;
 
 namespace HtmlNext;
 
-internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant, int Position = -1, string? Written = null);
+internal sealed record ComponentArgument(ValueExpression? Expression, object? Constant, int Position = -1, string? Written = null, int InputContextSlot = -1)
+{
+    public ExpressionValue Read(object?[] values, out bool available)
+    {
+        if (InputContextSlot < 0)
+        {
+            available = true;
+            return Expression!.Evaluate(values);
+        }
+        var context = (DeclarationEvaluation)values[InputContextSlot]!;
+        var previous = context.Ready;
+        context.Ready = true;
+        try
+        {
+            var value = Expression!.Evaluate(values);
+            available = context.Ready;
+            return value;
+        }
+        finally { context.Ready = previous; }
+    }
+}
 
 internal sealed record ComponentCall(ComponentReference Target, ComponentArgument?[] Arguments, RenderOperation[] DeferredAttributes, RootStyle? ParentStyle = null, ProjectionGroup[]? Projection = null, bool SharedRoot = false, InvocationAttribute?[]? Attributes = null) : RenderOperation
 {
     private readonly Prop[] props = Target.Props;
-    internal AcceptedChildEntry ReadEntry(string[] accepts, object?[] caller, object?[] owner, RenderContext context, CancellationToken cancellation)
+    internal AcceptedChildEntry ReadEntry(string[] accepts, int index, object?[] caller, object?[] owner, RenderContext context, CancellationToken cancellation)
     {
         var frames = new List<ProjectionFrame>();
         return Read(this, caller);
@@ -22,7 +42,7 @@ internal sealed record ComponentCall(ComponentReference Target, ComponentArgumen
             var frame = new ProjectionFrame(call.Projection ?? [], parent, matched ? owner : child, template.Tag, call.SharedRoot);
             context.RecordCollectedInvocation(call, parent, child, frame.Claims);
             frames.Add(frame);
-            if (matched) return new(new(call.Target.EntryType!, child), template.Tag, owner, frames.ToArray());
+            if (matched) return new(new(call.Target.EntryType!, child), template.Tag, owner, frames.ToArray(), index);
             var delegated = template.DelegatedInvocation ?? throw ValueType.Error(template.SourceName, "This accepted preset root is not implemented.");
             if (call.Target.ForwardsAttributes) context.CaptureInvocationAttributes(call.Attributes, call.props, parent, child);
             var previousFilter = context.PauseAcceptedProjection();
@@ -133,8 +153,14 @@ internal sealed record DeferredPropAttribute(string Name, ValueExpression Expres
     }
 }
 
-internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnostic>? onDiagnostic, bool interactive = false)
+internal sealed class RenderContext(bool cacheChildren, Action<HtmlNextDiagnostic>? onDiagnostic, bool interactive = false, HtmlNextPrepareModule? prepareModule = null)
 {
+    private readonly ModulePreparationState? preparation = prepareModule is null ? null : new(prepareModule);
+    public HtmlNextPrepareModule? PrepareModule => preparation?.Prepare;
+    public PreparedModuleRecord? PreparedModule(InstanceInputs inputs) => preparation?.For(inputs);
+    public void RecordPreparedModule(InstanceInputs inputs, PreparedModuleRecord record) => preparation!.Record(inputs, record);
+    public string? SerializedModuleBindings(InstanceInputs inputs) => preparation?.Serialized(inputs);
+    public void RecordModuleBindings(InstanceInputs inputs, string value) => preparation!.RecordSerialized(inputs, value);
     public bool Interactive { get; } = interactive;
     public bool Adopting { get; set; }
     private readonly List<object?[]>? children = cacheChildren ? [] : null;

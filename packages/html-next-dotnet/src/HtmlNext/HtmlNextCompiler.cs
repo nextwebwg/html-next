@@ -23,7 +23,7 @@ public static partial class HtmlNextCompiler
     [GeneratedRegex(@"\A[A-Za-z_$][A-Za-z0-9_$-]*\z", RegexOptions.CultureInvariant)]
     private static partial Regex ReferenceNamePattern();
 
-    private sealed class Compiler(IHtmlTemplateElement carrier, string source, IReadOnlyDictionary<string, ComponentReference> components, HtmlNextServerAssets? assets, string sourceHash)
+    private sealed class Compiler(IHtmlTemplateElement carrier, string source, IReadOnlyDictionary<string, ComponentReference> components, HtmlNextServerAssets? assets, string sourceHash, HtmlNextServerAssets? applicationAssets = null)
     {
         private readonly List<Prop> props = [];
         private readonly List<LocalInitializer> initializers = [];
@@ -40,6 +40,7 @@ public static partial class HtmlNextCompiler
         private readonly List<AcceptedChildListBinding> childLists = [];
         private readonly List<(string Name, int Slot, ValueType Type)> states = [];
         private InstanceRecordPlan? instance;
+        private PropReflectionPlan? reflection;
         private readonly Dictionary<int, IterationIndexBinding> indexLocals = [];
         public IReadOnlyDictionary<string, ScopedSlotContract> Slots => slotContracts;
         private IReadOnlyList<string> styleNames = [];
@@ -56,6 +57,21 @@ public static partial class HtmlNextCompiler
         private ExpressionStorage? expressionStorage;
         private ExpressionStorage Storage => expressionStorage ??= new();
         private static readonly HashSet<string> Void = new("area base br col embed hr img input link meta param source track wbr".Split(' '), StringComparer.Ordinal);
+        // Match the prototype normalization in the JavaScript compiler's language.ts.
+        private static readonly HashSet<string> WhitespaceDiscarding = new("table thead tbody tfoot tr colgroup svg g defs symbol clipPath mask pattern marker linearGradient radialGradient filter switch".Split(' '), StringComparer.Ordinal);
+        private readonly HashSet<IElement> discardsWhitespace = new(ReferenceEqualityComparer.Instance);
+
+        private void ReadWhitespaceContext(IElement element, bool inherited = false)
+        {
+            ExecutionStack.Check(source);
+            var discard = element is IHtmlTemplateElement && !element.HasAttribute("slot")
+                ? inherited : WhitespaceDiscarding.Contains(element.LocalName);
+            if (discard || element.HasAttribute("$match")) discardsWhitespace.Add(element);
+            foreach (var child in Children(element).OfType<IElement>()) ReadWhitespaceContext(child, discard);
+        }
+
+        private IEnumerable<INode> RenderedChildren(IElement element) => Children(element).Where(node =>
+            !discardsWhitespace.Contains(element) || node is not IText text || !text.Data.All(character => character is ' ' or '\t' or '\n' or '\r' or '\f'));
 
         public void ReadContract()
         {
@@ -71,7 +87,7 @@ public static partial class HtmlNextCompiler
                 module = new(Tag, source, specifier);
             }
             var children = carrier.Content.ChildNodes.Where(Significant).Where(node => node is not IElement element || !Metadata(element, source)).ToList();
-            if (children.FirstOrDefault() is IElement { LocalName: "defs" } defs)
+            if (children.FirstOrDefault(node => node is IElement { LocalName: "defs" }) is IElement defs)
             {
                 var declarations = defs.ChildNodes.Where(Significant).ToArray();
                 foreach (var node in declarations)
@@ -131,7 +147,7 @@ public static partial class HtmlNextCompiler
                         if (declaration.GetAttribute("type") is null or "unknown" && (declaration.Children.Length > 0 || declaration.Attributes.Any(attribute => attribute.Name is "open" or "values" or "min" or "max" or "minlength" or "maxlength")))
                             throw ValueType.Error(source, "An untyped state cannot declare fields or value constraints.");
                         var type = declaration.GetAttribute("type") is not (null or "unknown")
-                            ? DeclarationTypes.Read(declaration, source, true, Default).At(name) : new ValueType("unknown").At(name);
+                            ? DeclarationTypes.Read(declaration, source, true, Default).At(name) : new ValueType("unknown", Unconstrained: true).At(name);
                         var literal = declaration.GetAttribute("value");
                         var seed = declaration.GetAttribute("from");
                         if (seed is not null && (string.IsNullOrWhiteSpace(seed) || literal is not null))
@@ -157,7 +173,7 @@ public static partial class HtmlNextCompiler
                 foreach (var prop in props)
                     if (prop.Selection is { } selection) selection.Link(bindings,
                         derived.TryGetValue(selection.From, out var item) ? item.Declaration : null, selection.FromState ? preparationSlot : -1);
-                children.RemoveAt(0);
+                children.Remove(defs);
             }
             if (assets is not null) children.RemoveAll(node => node is IElement { LocalName: "style" });
             if (children.Count != 1 || children[0] is not IElement elementRoot) throw ValueType.Error(source, "Expected one native root after <defs>.");
@@ -212,34 +228,41 @@ public static partial class HtmlNextCompiler
         {
             ReadReferences(root, new(StringComparer.Ordinal));
             foreach (var name in derived.Keys) CompileDerived(name);
+            if (module is not null && declarationContextSlot < 0) declarationContextSlot = slots++;
+            var preparationScope = new DeclarationScope(this);
+            var preparationBindings = module is null ? [] : bindings.Select(binding => new PreparationBinding(binding.Key,
+                preparationScope.Read(binding.Key, binding.Value.Slot, binding.Value.Type))).ToArray();
             var propDefinitions = props.ToArray();
+            if (assets?.Hydrate == true && props.Count > 0)
+                reflection = new(slots++, Tag, propDefinitions, root.Attributes.Where(attribute => attribute.Name.StartsWith("from:data-", StringComparison.Ordinal))
+                    .Select(attribute => attribute.Name[5..]).ToArray(), source);
             if (assets?.Hydrate == true && assets.Client?.Adopts(Tag) == true)
                 instance = new(Tag, slots++, propDefinitions, states.Select(state => new HydrationState(state.Name, state.Slot, state.Type,
-                    derived.TryGetValue(state.Name, out var declaration) ? declaration.Declaration : null)).ToArray(), source, ForwardsAttributes);
+                    derived.TryGetValue(state.Name, out var declaration) ? declaration.Declaration : null)).ToArray(), source, ForwardsAttributes, declarationContextSlot);
             if (assets is not null) rootStyle = new(Tag, styleNames.Select(name => new RootStyleState(name,
-                bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source, Instance: instance);
+                bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source, Instance: instance, Reflection: reflection);
+            ReadWhitespaceContext(root);
             var operations = Element(root, bindings);
             if (expressionStorage is { Length: > 0 } scratch) scratch.AssignSlot(slots++);
-            return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), assets?.Stylesheets, childLists.ToArray(), assets, instance);
+            return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), (assets ?? applicationAssets)?.Stylesheets, childLists.ToArray(), assets ?? applicationAssets, instance, reflection, preparationBindings);
         }
 
         private Prop ReadProp(IElement prop, IReadOnlyCollection<Prop> declared, bool attributeOnly)
         {
-            foreach (var attribute in prop.Attributes)
-                if (attribute.Name is not ("name" or "type" or "required" or "default" or "values" or "min" or "max" or "minlength" or "maxlength" or "open")) Unsupported(attribute.Name);
+            DeclarationTypes.CheckAttributes(prop, source);
             if (string.IsNullOrWhiteSpace(prop.TextContent)) throw ValueType.Error(source, "A prop requires a description.");
             var name = prop.GetAttribute("name") ?? throw ValueType.Error(source, "A prop requires a name.");
             if (!ExpressionCompiler.IsIdentifier(name)) throw ValueType.Error(source, $"Invalid prop name '{name}'.");
             if (declared.Any(item => AsciiEquals(item.Name, name))) throw ValueType.Error(source, $"Duplicate prop '{name}'.");
             var selection = attributeOnly ? SelectedTypes.Read(prop, source) : null;
-            var type = selection is null ? DeclarationTypes.Read(prop, source, false, Default, javaScriptValues: !attributeOnly).At(name) : new ValueType("unknown").At(name);
+            var type = selection is null ? DeclarationTypes.Read(prop, source, false, Default, javaScriptValues: !attributeOnly).At(name) : new ValueType("unknown", Reference: true, Selection: selection).At(name);
             if (attributeOnly && selection is null && !type.HasAttributeForm) throw ValueType.Error(source, "A prop and its declared fields require an HTML attribute type.");
             var literal = prop.GetAttribute("default");
             if (literal is not null && selection is not null && selection.DefaultType is null)
                 throw ValueType.Error(source, "A dependent prop default requires a prop selector with a matching default.");
             var value = literal is null ? null : !attributeOnly && type.Kind == "unknown" ? literal : Default(literal, selection?.DefaultType ?? type);
             var constraints = ValueConstraints.Read(prop, type, source, Default);
-            var definition = new Prop(name, type, prop.HasAttribute("required"), value, constraints, selection);
+            var definition = new Prop(name, type, prop.HasAttribute("required"), value, constraints, selection, literal is not null);
             if (selection?.DefaultType is { } defaultType) definition = definition with { Default = definition.Store(value, defaultType) };
             if (literal is not null)
             {
@@ -289,7 +312,8 @@ public static partial class HtmlNextCompiler
                 if (declarations && compiler.derived.TryGetValue(name, out var item) && item.Declaration.Slot == slot)
                     return new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null, Declaration: item.Declaration));
                 return locals is IDeclarationExpressionScope inherited ? inherited.Read(name, slot, type)
-                    : new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null));
+                    : new PathExpression(new(slot, [], type, RootType: type.Reference ? type : null,
+                        InputContextSlot: declarations && compiler.declarationContextSlot >= 0 && slot < compiler.props.Count ? compiler.declarationContextSlot : -1));
             }
             public IEnumerator<KeyValuePair<string, (int Slot, ValueType Type)>> GetEnumerator() => ValuesByName.GetEnumerator();
             System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
@@ -325,15 +349,15 @@ public static partial class HtmlNextCompiler
             else if (text.Length > 0) operations.Add(new Literal(text));
         }
 
-        private void Text(List<RenderOperation> operations, string text, Dictionary<string, (int Slot, ValueType Type)> scope)
+        private void Text(List<RenderOperation> operations, string text, Dictionary<string, (int Slot, ValueType Type)> scope, bool plain = false)
         {
             var start = 0;
             while (start < text.Length)
             {
                 var offset = text.AsSpan(start).IndexOfAny('{', '\\');
-                if (offset < 0) { Add(operations, HtmlOutput.Escape(text[start..], false)); return; }
+                if (offset < 0) { Add(operations, plain ? text[start..] : HtmlOutput.Escape(text[start..], false)); return; }
                 var open = start + offset;
-                Add(operations, HtmlOutput.Escape(text[start..open], false));
+                Add(operations, plain ? text[start..open] : HtmlOutput.Escape(text[start..open], false));
                 if (text[open] == '\\')
                 {
                     if (open + 1 < text.Length && text[open + 1] is '{' or '\\')
@@ -346,7 +370,8 @@ public static partial class HtmlNextCompiler
                 }
                 var close = ExpressionEnd(text, open);
                 if (close < 0) throw ValueType.Error(source, "Unclosed text expression.");
-                operations.Add(TextOperation(Scalar(text[(open + 1)..close], scope)));
+                var expression = Scalar(text[(open + 1)..close], scope);
+                operations.Add(plain ? new PlainExpressionText(expression) : TextOperation(expression));
                 start = close + 1;
             }
         }
@@ -376,6 +401,9 @@ public static partial class HtmlNextCompiler
         private void ReadReferences(IElement element, HashSet<string> names)
         {
             ExecutionStack.Check(source);
+            if (declarationContextSlot < 0 && props.Count > 0 && element.LocalName.Contains('-')
+                && element.Attributes.Any(attribute => attribute.Name.StartsWith("from:", StringComparison.Ordinal)))
+                declarationContextSlot = slots++;
             if (element.GetAttribute("$ref") is { } name)
             {
                 if (!ReferenceNamePattern().IsMatch(name))
@@ -427,7 +455,7 @@ public static partial class HtmlNextCompiler
 
         private RenderOperation[] Element(IElement element, Dictionary<string, (int Slot, ValueType Type)> scope, bool matchArm = false, bool projected = false, bool guardHandled = false)
         {
-            if (element.LocalName is "script" or "style" or "defs" or "select") Unsupported(element.LocalName);
+            if (element.LocalName is "script" or "style" or "defs") Unsupported(element.LocalName);
             var fragment = element is IHtmlTemplateElement;
             if (!matchArm && (element.HasAttribute("$when") || element.HasAttribute("$else")))
                 throw ValueType.Error(source, "$when and $else require a direct $match parent.");
@@ -518,10 +546,18 @@ public static partial class HtmlNextCompiler
             if (!fragment) Add(operations, "<" + element.LocalName);
             var rootAttributes = !fragment && IsRoot(element) ? rootStyle : null;
             var attributes = element.Attributes.ToArray();
-            if (element.HasAttribute("$attributes") || !fragment && ImplicitForwarding(element))
+            CheckedInputProperty? checkedProperty = null;
+            var textareaProperty = element is IHtmlTextAreaElement
+                ? new TextareaValueProperty(slots++, element.GetAttribute(".value") is { } textareaExpression ? Expression(textareaExpression, scope) : null, source) : null;
+            if (element.GetAttribute(".checked") is { } checkedExpression)
+            {
+                if (element is not IHtmlInputElement) Unsupported("native property '.checked' on <" + element.LocalName + ">");
+                checkedProperty = new(Expression(checkedExpression, scope));
+            }
+            if (checkedProperty is not null || textareaProperty is not null || element is IHtmlInputElement && element.HasAttribute(".value") || element.HasAttribute("$attributes") || !fragment && (ImplicitForwarding(element) || attributes.Any(attribute => attribute.Name.StartsWith("style:", StringComparison.Ordinal))))
             {
                 if (element.HasAttribute("$attributes") && (fragment || element.GetAttribute("$attributes") != "")) throw ValueType.Error(source, "$attributes is valueless and requires a rendered destination.");
-                operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope), rootAttributes));
+                operations.Add(new ForwardedElementAttributes(ForwardingAttributes(element, scope), rootAttributes, checkedProperty, textareaProperty));
             }
             else
             {
@@ -571,7 +607,7 @@ public static partial class HtmlNextCompiler
                     var fallback = initial is null ? null : " " + name + "=\"" + HtmlOutput.Escape(initial.Value, true) + "\"";
                     RenderOperation operation = path is PathExpression { Type.Reference: false } bound ? new AttributeValue(name, bound.Path, kind, source, fallback)
                         : new ExpressionAttribute(name, path, kind, source, fallback);
-                    bindingsByName.Add(name, rootAttributes is not null && IsStateAttribute(name) ? new RootAuthoredAttribute(name, operation, rootAttributes) : operation);
+                    bindingsByName.Add(name, rootAttributes is not null && IsManagedRootAttribute(name) ? new RootAuthoredAttribute(name, operation, rootAttributes) : operation);
                     bindingOrder.Add((name, position));
                 }
                 else
@@ -585,7 +621,7 @@ public static partial class HtmlNextCompiler
                     if (rootAttributes is not null && authoredName == "component") continue;
                     var text = " " + authoredName + "=\"" + HtmlOutput.Escape(attribute.Value, true) + "\"";
                     RenderOperation literal = new Literal(text);
-                    literalOrder.Add((authoredName, rootAttributes is not null && IsStateAttribute(authoredName)
+                    literalOrder.Add((authoredName, rootAttributes is not null && IsManagedRootAttribute(authoredName)
                         ? new RootAuthoredAttribute(authoredName, literal, rootAttributes) : literal));
                 }
             }
@@ -606,21 +642,28 @@ public static partial class HtmlNextCompiler
             if (element.GetAttribute("$value") is { } value)
             {
                 if (Children(element).Any(Significant)) Unsupported("$value with authored children");
-                contents.Add(fragment && projected ? new ProjectionNode([TextOperation(Scalar(value, childrenScope))]) : TextOperation(Scalar(value, childrenScope)));
+                var expression = Scalar(value, childrenScope);
+                contents.Add(textareaProperty is not null ? new PlainExpressionText(expression)
+                    : fragment && projected ? new ProjectionNode([TextOperation(expression)]) : TextOperation(expression));
             }
             else if (element.HasAttribute("$match")) Append(contents, Match(element, childrenScope, fragment && projected));
-            else foreach (var child in Children(element))
+            else foreach (var child in RenderedChildren(element))
             {
                 if (child is IText text)
                 {
                     if (fragment && projected) contents.Add(ProjectedText(text.Data, childrenScope));
-                    else Text(contents, text.Data, childrenScope);
+                    else Text(contents, text.Data, childrenScope, plain: textareaProperty is not null);
                 }
                 else if (child is IElement nested) Append(contents, Element(nested, childrenScope, projected: fragment && projected));
-                else if (child is IComment comment) Add(contents, "<!--" + comment.Data + "-->");
-                else Unsupported("node");
+                else if (child is not IComment) Unsupported("node");
             }
-            Append(operations, alias is { } binding ? [new ScopedValue(binding.Value, binding.Slot, contents.ToArray())] : contents.ToArray());
+            var contentOperations = alias is { } binding ? [new ScopedValue(binding.Value, binding.Slot, contents.ToArray())] : contents.ToArray();
+            if (textareaProperty is not null)
+            {
+                textareaProperty.SetContents(contentOperations);
+                operations.Add(new TextareaValueContent(textareaProperty));
+            }
+            else Append(operations, contentOperations);
             if (!fragment && (element.NamespaceUri != "http://www.w3.org/1999/xhtml" || !Void.Contains(element.LocalName)))
             {
                 var closing = "</" + element.LocalName + ">";
@@ -641,11 +684,10 @@ public static partial class HtmlNextCompiler
         private RenderOperation[] ProjectedBody(IElement element, Dictionary<string, (int Slot, ValueType Type)> scope)
         {
             var operations = new List<RenderOperation>();
-            foreach (var child in Children(element))
+            foreach (var child in RenderedChildren(element))
             {
                 if (child is IText text) operations.Add(ProjectedText(text.Data, scope));
                 else if (child is IElement nested) Append(operations, Element(nested, scope, projected: true));
-                else if (child is IComment comment) Add(operations, "<!--" + comment.Data + "-->");
             }
             return operations.ToArray();
         }
@@ -780,7 +822,16 @@ public static partial class HtmlNextCompiler
             return contract.Props.Length == 0 ? null : new(contract, arguments, source);
         }
 
-        private static bool IsStateAttribute(string name) => name.StartsWith("data-", StringComparison.Ordinal) && name.EndsWith("-state", StringComparison.Ordinal);
+        private static bool IsManagedRootAttribute(string name) => name.StartsWith("data-", StringComparison.Ordinal)
+            && (name.EndsWith("-state", StringComparison.Ordinal) || name.Contains("-prop-", StringComparison.Ordinal));
+
+        private string StyleProperty(string name)
+        {
+            var property = name[6..];
+            if (!Regex.IsMatch(property, @"\A(?:--[a-z0-9_-]+|[a-z][a-z0-9-]*)\z", RegexOptions.CultureInvariant))
+                throw ValueType.Error(source, "A style binding requires one CSS property name.");
+            return property;
+        }
 
         private string AttributeName(IElement element, string name)
         {
@@ -822,12 +873,23 @@ public static partial class HtmlNextCompiler
             {
                 var name = QualifiedAttributeName(attribute);
                 if (name == "$attributes") { result.Add(null); continue; }
+                if (name == ".checked") continue;
+                if (name == ".value" && element is IHtmlInputElement)
+                {
+                    result.Add(new("value", null, Expression(attribute.Value, scope), source, "value-property")); continue;
+                }
+                if (name == ".value" && element is IHtmlTextAreaElement) continue;
                 if (name is "$if" or "$each" or "$value" or "$with" or "$match" or "$where" or "$sort" or "$limit" or "$key" or "$ref" or "$when" or "$else") continue;
                 if (name.StartsWith("class:", StringComparison.Ordinal))
                 {
                     var token = name[6..];
                     if (token.Length == 0 || token.Any(character => character is ' ' or '\t' or '\n' or '\r' or '\f')) throw ValueType.Error(source, "A class binding requires one nonempty class token.");
                     result.Add(new(token, null, Expression(attribute.Value, scope), source, "class")); continue;
+                }
+                if (name.StartsWith("style:", StringComparison.Ordinal))
+                {
+                    var property = StyleProperty(name);
+                    result.Add(new(property, null, Expression(attribute.Value, scope), source, "style")); continue;
                 }
                 var dynamic = name.StartsWith("from:", StringComparison.Ordinal);
                 if (!dynamic && (name == "srcdoc" || BoundAttributeRules.IsUrl(name) && BoundAttribute.ExecutableUrl(attribute.Value)))
@@ -843,6 +905,7 @@ public static partial class HtmlNextCompiler
 
         private ComponentCall Invocation(IElement element, Dictionary<string, (int Slot, ValueType Type)> scope, bool matchArm)
         {
+            if (element.HasAttribute(".checked")) Unsupported("native property '.checked' on a component invocation");
             if (!components.TryGetValue(element.LocalName, out var target)) throw ValueType.Error(source, $"Unknown component '{element.LocalName}'.");
             var projection = Projection(element, scope);
             var arguments = new ComponentArgument?[target.Props.Length];
@@ -867,6 +930,12 @@ public static partial class HtmlNextCompiler
                     forwarded.Add(attribute.Name, new(token, null, Expression(attribute.Value, scope), source, "class"));
                     continue;
                 }
+                if (attribute.Name.StartsWith("style:", StringComparison.Ordinal))
+                {
+                    var property = StyleProperty(attribute.Name);
+                    forwarded.Add(attribute.Name, new(property, null, Expression(attribute.Value, scope), source, "style"));
+                    continue;
+                }
                 var dynamic = attribute.Name.StartsWith("from:", StringComparison.Ordinal);
                 var name = dynamic ? attribute.Name[5..] : attribute.Name;
                 var index = Array.FindIndex(target.Props, prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name));
@@ -889,7 +958,7 @@ public static partial class HtmlNextCompiler
                 {
                     var expression = new ExpressionCompiler(attribute.Value, source, new DeclarationScope(this, ExpressionScope(scope)), Storage, declarationContextSlot).Compile();
                     if (!prop.Type.CanBindType(expression.Type)) throw ValueType.Error(source, $"Binding '{name}' has an incompatible type.");
-                    arguments[index] = new(expression, arguments[index]?.Constant, Written: arguments[index]?.Written);
+                    arguments[index] = new(expression, arguments[index]?.Constant, Written: arguments[index]?.Written, InputContextSlot: declarationContextSlot);
                     names[index] = name;
                 }
                 else
@@ -905,7 +974,7 @@ public static partial class HtmlNextCompiler
                 else propAttributes.Add(index, new Literal(fallbacks[index]));
             var deferred = new List<RenderOperation>();
             var implicitForwarding = ImplicitForwarding(element);
-            var deferredOrdered = implicitForwarding || element.HasAttribute("$attributes") || forwarded.Values.Any(attribute => attribute.Target == "class") ? new List<InvocationAttribute?>() : null;
+            var deferredOrdered = implicitForwarding || element.HasAttribute("$attributes") || forwarded.Values.Any(attribute => attribute.Target is not null) ? new List<InvocationAttribute?>() : null;
             var attributes = new List<InvocationAttribute?>();
             if (implicitForwarding) { attributes.Add(null); deferredOrdered!.Add(null); }
             var writtenProps = new HashSet<int>();
@@ -915,7 +984,7 @@ public static partial class HtmlNextCompiler
                 if (attribute.Name == "$attributes") { attributes.Add(null); deferredOrdered?.Add(null); continue; }
                 var name = attribute.Name.StartsWith("from:", StringComparison.Ordinal) ? attribute.Name[5..] : attribute.Name;
                 var index = Array.FindIndex(target.Props, prop => AsciiEquals(prop.Name, name) || AsciiEquals(prop.AttributeName, name));
-                if (!attribute.Name.StartsWith("from:", StringComparison.Ordinal) && !attribute.Name.StartsWith("class:", StringComparison.Ordinal) && (index >= 0 ? bound.Contains(index) : forwarded.GetValueOrDefault(name)?.Expression is not null)) continue;
+                if (!attribute.Name.StartsWith("from:", StringComparison.Ordinal) && !attribute.Name.StartsWith("class:", StringComparison.Ordinal) && !attribute.Name.StartsWith("style:", StringComparison.Ordinal) && (index >= 0 ? bound.Contains(index) : forwarded.GetValueOrDefault(name)?.Expression is not null)) continue;
                 if (index >= 0 && writtenProps.Add(index))
                 {
                     deferred.Add(propAttributes[index]);
@@ -981,7 +1050,7 @@ public static partial class HtmlNextCompiler
     internal static object? AttributeInput(string text, ValueType type, string source, CancellationToken cancellation = default)
     {
         object? value;
-        if (type.Kind is "string" or "keyword" or "length" or "percentage" or "duration") value = text;
+        if (type.Textual || type.Kind is "length" or "percentage" or "duration") value = text;
         else if (type.Kind == "boolean" && text is "true" or "false" or "") value = text != "false";
         else if (type.Kind is "number" or "integer" && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)) value = number;
         else
@@ -991,7 +1060,7 @@ public static partial class HtmlNextCompiler
             if (!expression.Constant || !compiler.LiteralOnly) throw ValueType.Error(source, "A default requires a literal value.");
             value = ModelValue(expression.Evaluate([]));
         }
-        return type.Bind(value, source, cancellation);
+        return value is null && type.Kind is "list" or "object" ? null : type.Bind(value, source, cancellation);
     }
 
     private static object? ModelValue(ExpressionValue value)
