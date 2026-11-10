@@ -61,6 +61,6 @@ public sealed class SelectRenderingTests
             <template component="s-lect"><strong>Other</strong></template>
             <template component="x-select"><main data-literal="<select>"><textarea><select>Text</select></textarea><!-- <select><slot></slot></select> --><s-lect></s-lect><SeLeCt><slot><option>A</option></slot></SeLeCt></main></template>
             """);
-        Assert.Equal("<main data-literal=\"&lt;select&gt;\"><textarea>&lt;select&gt;Text&lt;/select&gt;</textarea><!-- <select><slot></slot></select> --><strong>Other</strong><select><?start slot=\"\" fallback=\"\"?><option>A</option><?end?></select></main>", graph.Template("x-select").Render());
+        Assert.Equal("<main data-literal=\"&lt;select&gt;\"><textarea>&lt;select&gt;Text&lt;/select&gt;</textarea><strong>Other</strong><select><?start slot=\"\" fallback=\"\"?><option>A</option><?end?></select></main>", graph.Template("x-select").Render());
     }
 }

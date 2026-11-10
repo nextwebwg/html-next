@@ -3,7 +3,8 @@ import { JSDOM } from "jsdom";
 import { afterEach, beforeAll, describe, it, vi } from "vitest";
 import { componentInputs, READY_INPUT } from "../src/inputs.js";
 import { getComponentHost, serializeRenderedForm } from "../src/runtime.js";
-import { parseComponent } from "../src/source-parser.js";
+import { parseComponent, parseComponentResource } from "../src/source-parser.js";
+import { createRenderer } from "../src/server.js";
 import { compiledFixtures } from "./hydration-fixtures.js";
 
 const source = '<template component="x-seed"><defs><prop name="product" type="object({ name: string })">Product.</prop><state name="draft" type="string" from="$product.name"></state><state name="ordinary" type="integer" value="1"></state><computed name="label" from="concat($draft, \'!\')"></computed></defs><section><b $await="$draft">{$draft}</b><p $error="problem">{$problem.message}</p><i $else>Waiting.</i><input bind:value="$draft"></section></template>';
@@ -39,6 +40,30 @@ async function create(props: object = {}, html = "", compiled = code) {
 }
 
 describe("compiled one-time state initialization", () => {
+  it("replaces borrowed scoped server content when its callback creates fresh nodes", async () => {
+    const definitions = parseComponentResource(`<template component="x-column"><defs><slot name="cell"><prop name="item" type="string" required>Item.</prop></slot></defs><aside></aside></template>
+      <template component="x-seed"><defs><prop name="label" type="string" default="Kept">Label.</prop><slot accepts="x-column" as="columns"></slot></defs><section><div $each="column of $columns" $key="$column"><slot of="$column" name="cell" from:item="$label"></slot></div><div hidden><slot></slot></div></section></template>
+      <template component="x-page"><x-seed><x-column><template slot="cell"><output>{$item}</output></template></x-column></x-seed></template>`, "borrowed-scoped.html").definitions;
+    const renderer = createRenderer({ workers: 1 });
+    let html: string;
+    try { html = (await renderer.render("<x-page></x-page>", { definitions })).html; }
+    finally { await renderer.close(); }
+    const compiled = await compiledFixtures("esm", `
+      import { scopedTemplate } from "@nextwebwg/html-next/generated-runtime";
+      const seed = factories["x-seed"];
+      factories["x-seed"] = (props, html, root) => {
+        const carrier = document.createElement("template"); carrier.setAttribute("slot", "cell");
+        scopedTemplate(carrier, { l: new Set(), p() {}, m(_dirty, props) {
+          const n = document.createDocumentFragment(), output = document.createElement("output");
+          output.textContent = props.item; n.append(output); return { n, s: props };
+        } });
+        const column = factories["x-column"]({ slots: { cell: [carrier] } }, undefined, root.querySelector("aside"));
+        return seed({ ...props, children: [column] }, html, root);
+      };
+    `, definitions);
+    const { root } = await create({}, html, compiled);
+    assert.deepEqual([...root.querySelectorAll("output")].map(output => output.textContent), ["Kept"]);
+  });
   it("returns an object literal from a seed and keeps the initialized draft writable", async () => {
     const definition = parseComponent(`<template component="x-seed"><defs>
       <prop name="label" type="string" default="Label">Label.</prop>

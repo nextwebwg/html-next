@@ -4,6 +4,7 @@ import { readFile, writeFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const workspace = fileURLToPath(new URL("../../../", import.meta.url));
@@ -17,6 +18,7 @@ execFileSync("corepack", ["pnpm", "build"], { cwd: workspace, stdio: "inherit" }
 execFileSync("dotnet", ["build", fixtureHost, "-c", "Release", "--nologo"], { stdio: "inherit" });
 const { prepareLibrary } = await import(pathToFileURL(path.join(looma, "tests/renderers/prepare-library.ts")).href);
 const directory = await prepareLibrary();
+const cache = `looma-html-next-${createHash("sha256").update(directory).digest("hex").slice(0, 16)}`;
 let host: ReturnType<typeof spawn> | undefined;
 let lines: ReturnType<typeof createInterface> | undefined;
 try {
@@ -54,4 +56,6 @@ try {
   lines?.close();
   if (host?.pid && host.exitCode === null && host.signalCode === null) { host.kill(); await once(host, "exit"); }
   await rm(directory, { recursive: true, force: true });
+  await Promise.all(["", "-modules", "-fixtures-production", "-fixtures-development"].map(suffix =>
+    rm(path.join(looma, "node_modules/.vite", cache + suffix), { recursive: true, force: true })));
 }

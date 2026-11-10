@@ -57,6 +57,21 @@ public static partial class HtmlNextCompiler
         private ExpressionStorage? expressionStorage;
         private ExpressionStorage Storage => expressionStorage ??= new();
         private static readonly HashSet<string> Void = new("area base br col embed hr img input link meta param source track wbr".Split(' '), StringComparer.Ordinal);
+        // Match the prototype normalization in the JavaScript compiler's language.ts.
+        private static readonly HashSet<string> WhitespaceDiscarding = new("table thead tbody tfoot tr colgroup svg g defs symbol clipPath mask pattern marker linearGradient radialGradient filter switch".Split(' '), StringComparer.Ordinal);
+        private readonly HashSet<IElement> discardsWhitespace = new(ReferenceEqualityComparer.Instance);
+
+        private void ReadWhitespaceContext(IElement element, bool inherited = false)
+        {
+            ExecutionStack.Check(source);
+            var discard = element is IHtmlTemplateElement && !element.HasAttribute("slot")
+                ? inherited : WhitespaceDiscarding.Contains(element.LocalName);
+            if (discard || element.HasAttribute("$match")) discardsWhitespace.Add(element);
+            foreach (var child in Children(element).OfType<IElement>()) ReadWhitespaceContext(child, discard);
+        }
+
+        private IEnumerable<INode> RenderedChildren(IElement element) => Children(element).Where(node =>
+            !discardsWhitespace.Contains(element) || node is not IText text || !text.Data.All(character => character is ' ' or '\t' or '\n' or '\r' or '\f'));
 
         public void ReadContract()
         {
@@ -226,6 +241,7 @@ public static partial class HtmlNextCompiler
                     derived.TryGetValue(state.Name, out var declaration) ? declaration.Declaration : null)).ToArray(), source, ForwardsAttributes, declarationContextSlot);
             if (assets is not null) rootStyle = new(Tag, styleNames.Select(name => new RootStyleState(name,
                 bindings.ContainsKey(name) ? Expression("$" + name, bindings) : new ConstantExpression(ExpressionValue.Null))).ToArray(), source, Instance: instance, Reflection: reflection);
+            ReadWhitespaceContext(root);
             var operations = Element(root, bindings);
             if (expressionStorage is { Length: > 0 } scratch) scratch.AssignSlot(slots++);
             return new(Tag, propDefinitions, operations, slots, source, expressionStorage, hasComponents, initializers.ToArray(), module, declarationContextSlot, derived.Values.Select(item => item.Declaration).ToArray(), (assets ?? applicationAssets)?.Stylesheets, childLists.ToArray(), assets ?? applicationAssets, instance, reflection, preparationBindings);
@@ -631,7 +647,7 @@ public static partial class HtmlNextCompiler
                     : fragment && projected ? new ProjectionNode([TextOperation(expression)]) : TextOperation(expression));
             }
             else if (element.HasAttribute("$match")) Append(contents, Match(element, childrenScope, fragment && projected));
-            else foreach (var child in Children(element))
+            else foreach (var child in RenderedChildren(element))
             {
                 if (child is IText text)
                 {
@@ -639,8 +655,7 @@ public static partial class HtmlNextCompiler
                     else Text(contents, text.Data, childrenScope, plain: textareaProperty is not null);
                 }
                 else if (child is IElement nested) Append(contents, Element(nested, childrenScope, projected: fragment && projected));
-                else if (child is IComment comment) Add(contents, "<!--" + comment.Data + "-->");
-                else Unsupported("node");
+                else if (child is not IComment) Unsupported("node");
             }
             var contentOperations = alias is { } binding ? [new ScopedValue(binding.Value, binding.Slot, contents.ToArray())] : contents.ToArray();
             if (textareaProperty is not null)
@@ -669,11 +684,10 @@ public static partial class HtmlNextCompiler
         private RenderOperation[] ProjectedBody(IElement element, Dictionary<string, (int Slot, ValueType Type)> scope)
         {
             var operations = new List<RenderOperation>();
-            foreach (var child in Children(element))
+            foreach (var child in RenderedChildren(element))
             {
                 if (child is IText text) operations.Add(ProjectedText(text.Data, scope));
                 else if (child is IElement nested) Append(operations, Element(nested, scope, projected: true));
-                else if (child is IComment comment) Add(operations, "<!--" + comment.Data + "-->");
             }
             return operations.ToArray();
         }

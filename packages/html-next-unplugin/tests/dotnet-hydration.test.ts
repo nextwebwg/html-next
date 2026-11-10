@@ -15,7 +15,7 @@ import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 
 const execute = promisify(execFile);
 const host = fileURLToPath(new URL("../../html-next-dotnet/tests/HtmlNext.FixtureHost/", import.meta.url));
-const source = '<template component="x-card"><defs><prop name="title" type="string" default="Default">Title.</prop><state name="draft" type="string" from="$title"></state></defs><article><input value="Original"><b>{$title}</b><output>{$draft}</output></article></template><template component="x-static"><p>StaticOnlyFactoryMarker</p></template>'
+const source = '<template component="x-card"><defs><prop name="title" type="string" default="Default">Title.</prop><state name="draft" type="string" from="$title"></state></defs><article><input value="Original"><!-- Authored note must not break adoption. --><b>{$title}</b><output>{$draft}</output></article></template><template component="x-static"><p>StaticOnlyFactoryMarker</p></template>'
   + '<template component="x-flow"><defs><prop name="show" type="boolean" default="true">Show.</prop><prop name="rows" type="list(number)" default="[1, 2]">Rows.</prop><prop name="mode" type="number" default="1">Mode.</prop></defs><div><section $if="$show"><input value="Conditional"></section><ul><li $each="row, index of $rows" $key="$row"><input value="Row"><b>{$row}</b><i>{$index}</i></li></ul><template $each="row of $rows"><em>{$row}</em><small>tail</small></template><aside $with="$mode as current"><output>{$current}</output></aside><template $match><b $when="$mode = 1">First</b><i $else>Second</i></template><x-card title="Nested"></x-card></div></template>'
   + '<template component="x-shell"><defs><prop name="title" type="string" default="Shell">Title.</prop></defs><x-card from:title="$title"></x-card></template>'
   + '<template component="x-slots"><defs><prop name="open" type="boolean" default="false">Open.</prop><slot name="row"><prop name="item" type="string">Item.</prop></slot></defs><article><section $if="$open"><slot name="details"></slot></section><slot name="row" from:item="\'Row\'"></slot><slot>Fallback</slot></article></template>'
@@ -29,7 +29,8 @@ const source = '<template component="x-card"><defs><prop name="title" type="stri
   + "<template component=\"x-formatted-message\"><defs><prop name=\"names\" type=\"list(string)\">Names.</prop><prop name=\"offset\" type=\"number\">Offset.</prop></defs><article><output class=\"names\">{format($names, {}, 'en-US')}</output><output class=\"relative\">{format($offset, 'relativeTime', { unit: 'day', numeric: 'auto' }, 'en-US')}</output></article></template>"
   + "<template component=\"x-formatted-name-plural\"><defs><prop name=\"region\" type=\"string\">Region.</prop><prop name=\"count\" type=\"number\">Count.</prop></defs><article><output class=\"region\">{format($region, 'displayName', { type: 'region' }, 'en-US')}</output><output class=\"plural\">{format($count, 'plural', { forms: { one: '# item', other: '# items' } }, 'en-US')}</output></article></template>"
   + "<template component=\"x-formatted-duration\"><defs><prop name=\"elapsed\" type=\"duration\">Elapsed.</prop><prop name=\"seconds\" type=\"number\">Seconds.</prop></defs><article><output class=\"elapsed\">{format($elapsed, { style: \"digital\" }, \"en-US\")}</output><output class=\"record\">{format({ seconds: $seconds }, \"duration\", { style: \"digital\" }, \"en-US\")}</output></article></template>"
-  + "<template component=\"x-native-styles\"><defs><prop name=\"count\" type=\"number\">Count.</prop><prop name=\"width\" type=\"length\">Width.</prop><prop name=\"whole\" type=\"string\">Whole style.</prop></defs><article style=\"margin: 1px 2px !important; --empty: \" style:margin-left=\"$width\" style:--count=\"$count\"><output>{$count}</output><b from:style=\"$whole\" style:--count=\"$count\">Whole</b></article></template>";
+  + "<template component=\"x-native-styles\"><defs><prop name=\"count\" type=\"number\">Count.</prop><prop name=\"width\" type=\"length\">Width.</prop><prop name=\"whole\" type=\"string\">Whole style.</prop></defs><article style=\"margin: 1px 2px !important; --empty: \" style:margin-left=\"$width\" style:--count=\"$count\"><output>{$count}</output><b from:style=\"$whole\" style:--count=\"$count\">Whole</b></article></template>"
+  + '<template component="x-native-table"><defs><prop name="rows" type="list(number)" default="[1, 2]">Rows.</prop></defs><table>\n<tbody>\n<template $each="row of $rows" $key="$row">\n<tr>\n<td> Cell {$row} <input value="Original"></td>\n</tr>\n</template>\n</tbody>\n</table></template>';
 const checkedSource = '<template component="x-native-checked"><defs><prop name="active" type="boolean" default="true">Active.</prop></defs><form><input id="plainChecked" type="checkbox" value="plain" .checked="$active"><input id="authoredChecked" type="checkbox" value="authored" checked .checked="not($active)"><input type="radio" name="status" value="active" .checked="$active"><input type="radio" name="status" value="inactive" .checked="not($active)"></form></template>';
 const valueTypes = ["text", "password", "search", "tel", "number", "range", "color", "date", "month", "week", "time", "datetime-local", "email", "url", "checkbox", "radio", "hidden", "button", "submit", "reset", "image", "file"];
 const valueSource = '<template component="x-native-value"><defs><prop name="value" type="string" default="17">Value.</prop></defs><form>'
@@ -75,7 +76,7 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       export const adopt = (host, options) => binding(host, options.snapshot.source).adopt(host, options);
       export const connect = (host, options) => binding(host).connect(host, options);`);
     await writeFile(join(directory, "main.js"), `export { hydrate } from ${JSON.stringify(hydrationModule)}; export { componentRegistry } from "@nextwebwg/html-next/generated-runtime";`);
-    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-native-styles", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal", "x-native-checked", "x-native-value", "x-native-area"] } })],
+    await build({ root: directory, configFile: false, logLevel: "silent", plugins: [htmlNext.vite({ entries: ["card.html"], hydrate: true, client: { publicRoots: ["x-card", "x-flow", "x-shell", "x-project", "x-data", "x-attribute-source", "x-selected", "x-selected-default", "x-native-select", "x-formatted-date", "x-formatted-message", "x-formatted-name-plural", "x-formatted-duration", "x-native-styles", "x-page", "x-list", "x-column", "x-wait", "x-wait-shell", "x-wait-literal", "x-native-checked", "x-native-value", "x-native-area", "x-native-table"] } })],
       resolve: { alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../../html-next/src/generated-runtime.ts", import.meta.url)),
         "@nextwebwg/html-next/bindings": fileURLToPath(new URL("../../html-next/src/bindings.ts", import.meta.url)) } },
       build: { minify: false, lib: { entry: join(directory, "main.js"), formats: ["iife"], name: "NativeClient", fileName: () => "app.js", cssFileName: "components" } } });
@@ -111,6 +112,25 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
       preparationReads: { seed: JSON.stringify(encodeHydrationValue(2)) },
       prepared: { "x-prepared": { source, reads: { rows: { inputKey: JSON.stringify(encodeHydrationValue({ count: 2, filters: [], seed: 2 })), value: JSON.stringify(encodeHydrationValue(["2:0:0", "2:1:0"])) } } } } });
   }
+
+  it("adopts table rows without losing edits to structural whitespace", async () => {
+    const { window } = new JSDOM(await render("x-native-table"), { runScripts: "dangerously" });
+    try {
+      const root = window.document.querySelector("table")!;
+      const inputs = [...root.querySelectorAll("input")];
+      inputs[0]!.value = "Early table edit";
+      window.eval(bundle);
+      const client = Reflect.get(window, "NativeClient");
+      client.hydrate();
+      assert.equal(window.document.querySelector("table"), root);
+      assert.equal(root.querySelector("input"), inputs[0]);
+      assert.equal(inputs[0]!.value, "Early table edit");
+      client.componentRegistry.update(root, { rows: [2, 1] });
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      assert.deepEqual([...root.querySelectorAll("input")], [inputs[1], inputs[0]]);
+      assert.equal(inputs[0]!.value, "Early table edit");
+    } finally { window.close(); }
+  });
 
   it("adopts native checked properties while preserving early edits and authored reset defaults", async () => {
     const { window } = new JSDOM(await render("x-native-checked"), { runScripts: "dangerously" });
@@ -498,6 +518,24 @@ describe.skipIf(process.env.HTMLNEXT_DOTNET_TEST !== "1")("native C# instance ad
   });
 
   for (const [name, engine] of [["Chromium", chromium], ["Firefox", firefox], ["WebKit", webkit]] as const) {
+    it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts table whitespace without losing a focused early edit`, async () => {
+      const browser = await launchParityBrowser(engine);
+      try {
+        const page = await browser.newPage();
+        await page.setContent(await render("x-native-table"));
+        await page.evaluate(() => Reflect.set(window, "tableControls", [...document.querySelectorAll("input")]));
+        await page.locator("input").first().fill("Early table edit");
+        await page.addScriptTag({ content: bundle });
+        await page.evaluate(() => Reflect.get(window, "NativeClient").hydrate());
+        assert.equal(await page.locator("input").first().inputValue(), "Early table edit");
+        assert.equal(await page.evaluate(() => document.querySelector("input") === Reflect.get(window, "tableControls")[0]), true);
+        assert.equal(await page.evaluate(() => document.activeElement === document.querySelector("input")), true);
+        await page.evaluate(() => Reflect.get(window, "NativeClient").componentRegistry.update(document.querySelector("table"), { rows: [2, 1] }));
+        await page.waitForFunction(() => document.querySelectorAll("input")[1] === Reflect.get(window, "tableControls")[0]);
+        assert.equal(await page.locator("input").last().inputValue(), "Early table edit");
+      } finally { await browser.close(); }
+    });
+
     it.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== "1")(`${name} adopts initial textarea content without losing its first newline, early edits or reset defaults`, async () => {
       const browser = await launchParityBrowser(engine);
       try {

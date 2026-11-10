@@ -2,6 +2,12 @@
 
 ## 1.0.0-alpha.93
 
+- Remove stale server content when a borrowed scoped-slot callback creates a fresh rendering during adoption, preventing duplicate cell content.
+
+- Match native rendered trees to generated browser prototypes by omitting authored comments and non-rendering table/SVG whitespace. Preserve early edits and table rows during adoption.
+
+- Record accepted native parent bindings as caller-provided inputs. Reserve producer ownership for completed module reads.
+
 - Serialize native textarea `.value` bindings as initial text content with authored reset defaults. Preserve leading newlines through Node's textarea HTML serialization.
 
 - Serialize native input `.value` bindings into initial HTML and preserve authored reset defaults in the existing client records. Compose ordered attributes, invocation forwarding and `.checked` records; let browser parsing normalize control values.

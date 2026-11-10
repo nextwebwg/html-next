@@ -174,6 +174,10 @@ var html = graph.Template("x-page").Render(model,
 
 Interactive roots also carry the SDK's `data-<tag>-prop-<name>` attributes for explicit accepted inputs, including components pruned from adoption. Omitted and null inputs leave defaults implicit. A refused direct input records its accepted fallback; a refused nested binding retains a valid written literal without making an unwritten default explicit. Shared roots keep each component owner's attributes, and structured values use JSON text. These attributes are SDK interoperability metadata, independent of the instance record's client selection.
 
+Ordinary parent bindings remain caller-provided inputs in the instance record. Completed module reads carry producer ownership. The browser bundle uses those records to restore the component's caller inputs during adoption.
+
+Rendered native content omits authored comments and whitespace-only text among table-structure and SVG-container children, matching the JavaScript compiler's prototypes. Transparent templates inherit that whitespace context. Cell and SVG text content retain their authored whitespace; inert carrier source remains available to the browser compiler.
+
 Interactive rendering requires a compatible client plan and assets built with `hydrate: true`; missing or incompatible assets raise `HNCS006` before binding inputs or writing output. Component source fingerprints are checked during compilation. Inert rendering remains the default and can reuse the same compiled graph.
 
 Native output carries accepted props, input source and caller ownership, state, unready prop availability and claimed one-time initializers in the existing version 1 instance format. Omitted or refused props keep dependent seeds waiting, including through component bindings; explicit nulls and available defaults claim their seeds. Explicit null inputs retain caller ownership while the accepted prop takes its declared default. Shared roots hold a record for each owner. Explicit `$attributes` owners record only the invocation attributes not consumed by props. Tagged values preserve negative zero and shared references; cyclic or non-finite values raise `HNCS008` during interactive serialization. Request-local getter snapshots and records are reused between the buffered renderer's counting and writing passes.
@@ -233,13 +237,13 @@ corepack pnpm measure:dotnet:node
 corepack pnpm measure:dotnet --allocations
 ```
 
-The native catalog bridge runs Looma's unchanged shared SSR scenarios against one retained C# library. It requires a Looma checkout with the native server-module fixture hook and its emitted source/asset metadata:
+The native catalog bridge runs Looma's shared SSR and node-driven browser scenarios against one retained C# library. It requires a Looma checkout with the native server-module and browser-plugin fixture hooks and its emitted source/asset metadata:
 
 ```sh
-node packages/html-next-dotnet/tests/run-looma.ts /path/to/looma ssr.test.ts
+node packages/html-next-dotnet/tests/run-looma.ts /path/to/looma
 ```
 
-The runner builds the SDK and fixture host, prepares the real catalog once, and checks that the complete catalog reached C#. It preserves the calling process's locale for each request and removes its temporary library and native host afterward. Full shared native catalog qualification remains unfinished.
+The runner builds the SDK and fixture host, prepares the real catalog once, and checks that the complete catalog reached C#. Converted scenes receive native initial HTML before the normal browser adapter adopts it. Requests preserve the browser's locale, or the calling process's locale for SSR. The runner removes its temporary library, Vite caches and native host afterward. Append a test filename to select a focused run. Vitest browser-mode tests and initial rendering of HTML-only fixtures remain outside this bridge's coverage.
 
 The .NET benchmark uses BenchmarkDotNet with allocation diagnostics. It compares cached HTML Next plans and cached Fluid templates, with fresh per-render input binding and complete string output on both sides. Each case validates full output against an independently constructed expectation before timing and prints template, model, and output hashes. The benchmark warms POCO accessors before measurement.
 

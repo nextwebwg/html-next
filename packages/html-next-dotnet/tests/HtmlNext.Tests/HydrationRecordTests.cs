@@ -78,6 +78,25 @@ public sealed class HydrationRecordTests
     }
 
     [Theory]
+    [InlineData("$name", "Provided")]
+    [InlineData("$draft", "Provided")]
+    [InlineData("null", "Default")]
+    public void ParentBindingsRemainCallerProvidedRatherThanModuleProduced(string expression, string accepted)
+    {
+        var source = """
+            <template component="x-card"><defs><prop name="title" type="string" default="Default">Title.</prop></defs><article><input from:value="$title"></article></template>
+            <template component="x-static"><defs><prop name="name" type="string" default="Provided">Name.</prop><state name="draft" type="string" from="$name"></state></defs><main><x-card from:title="EXPRESSION"></x-card></main></template>
+            """.Replace("EXPRESSION", expression, StringComparison.Ordinal);
+        var html = Graph(source).Template("x-static").Render(options: new() { Interactive = true });
+        var record = Records(html).GetProperty("x-card");
+        Assert.Equal(accepted, record.GetProperty("props").GetProperty("title").GetString());
+        var input = record.GetProperty("inputs").GetProperty("title");
+        Assert.True(input.GetProperty("provided").GetBoolean());
+        Assert.False(input.GetProperty("producer").GetBoolean());
+        Assert.Equal("value", input.GetProperty("source").GetString());
+    }
+
+    [Theory]
     [InlineData("missing", "Fallback")]
     [InlineData("null", "Fallback")]
     [InlineData("empty", "")]

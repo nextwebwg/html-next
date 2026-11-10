@@ -22,6 +22,42 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
+  it("omits authored comments from rendered content and slot fallbacks", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const supplied of [false, true]) {
+        const definitions = [
+          parseComponent('<template component="x-card"><article>Before<!-- authored-note -->After<slot>Fall<!-- fallback-note -->back</slot></article></template>'),
+          parseComponent(`<template component="x-parent"><main><x-card>${supplied ? "Given<!-- projected-note -->Text" : ""}</x-card></main></template>`),
+        ];
+        const { html } = await renderer.render('<x-parent></x-parent>', { definitions });
+        const dom = new JSDOM(html);
+        try {
+          assert.ok(!html.includes("-note"));
+          assert.equal(dom.window.document.querySelector("article")!.textContent, "BeforeAfter" + (supplied ? "GivenText" : "Fallback"));
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("records parent-bound props as caller-provided rather than module-produced", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const expression of ["$name", "$draft", "null"]) {
+        const definitions = [
+          parseComponent('<template component="x-card"><defs><prop name="title" type="string" default="Default">Title.</prop></defs><article><input from:value="$title"></article></template>'),
+          parseComponent(`<template component="x-parent"><defs><prop name="name" type="string" default="Provided">Name.</prop><state name="draft" type="string" from="$name"></state></defs><main><x-card from:title="${expression}"></x-card></main></template>`),
+        ];
+        const { html } = await renderer.render('<x-parent></x-parent>', { definitions });
+        const dom = new JSDOM(html);
+        try {
+          const record = renderedInstanceRecord(dom.window.document.querySelector("article")!, "x-card")!;
+          assert.equal(record.props.title, expression === "null" ? "Default" : "Provided");
+          assert.equal(record.inputs.title!.provided, true);
+          assert.equal(record.inputs.title!.producer ?? false, false);
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
   it("discovers a large registered component catalog without a combined selector limit", async () => {
     const definitions = Array.from({ length: 60 }, (_, index) => {
       const tag = `x-long-component-name-for-discovery-${index}`;

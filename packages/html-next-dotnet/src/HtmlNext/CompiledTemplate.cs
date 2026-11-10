@@ -270,7 +270,7 @@ public sealed partial class CompiledTemplate
             object? raw = forwarded ? inheritedText : argument?.Written;
             var inputSource = "html";
             var present = forwarded || argument?.Written is not null;
-            var producer = argument?.Expression is not null;
+            var bound = argument?.Expression is not null;
             var available = true;
             values[index] = prop.Default;
             if (argument?.Expression is not null)
@@ -306,7 +306,7 @@ public sealed partial class CompiledTemplate
                         raw = argument.Written;
                         inputSource = "html";
                         present = true;
-                        producer = false;
+                        bound = false;
                     }
                     else failed = true;
                     onDiagnostic?.Invoke(new("HNCS004", error.Detail, source));
@@ -328,9 +328,9 @@ public sealed partial class CompiledTemplate
             }
             if (caller is null && !failed && values[index] is null && prop.Required)
                 onDiagnostic?.Invoke(new("HNCS003", $"Required input '{prop.Name}' is missing.", source));
-            var reflects = !producer || !failed && available;
+            var reflects = !bound || !failed && available;
             metadata?.Capture(values, index, raw, present && reflects);
-            record?.Add(prop.Name, raw, present, present && !failed && !producer, inputSource, producer, reflects);
+            record?.Add(prop.Name, raw, present, present && !failed && available, inputSource, explicitInput: reflects);
         }
         if (inputReady is not null) ((DeclarationEvaluation)values[declarationContextSlot]!).RefreshWaiting(declarations);
         if (caller is not null)
