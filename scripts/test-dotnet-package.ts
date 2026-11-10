@@ -33,6 +33,15 @@ try {
     Console.WriteLine("NuGet consumer passed");
   `);
   await execute("dotnet", ["restore", "--source", feed, "--source", "https://api.nuget.org/v3/index.json", "--packages", join(directory, "packages"), "--nologo"], { cwd: consumer });
+  const installed = join(directory, "packages", id.toLowerCase(), version);
+  const metadata = await readFile(join(installed, `${id.toLowerCase()}.nuspec`), "utf8");
+  assert.match(metadata, /<icon>icon\.png<\/icon>/);
+  const icon = await readFile(join(installed, "icon.png"));
+  assert.equal(icon.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+  assert.equal(icon.readUInt32BE(16), 128);
+  assert.equal(icon.readUInt32BE(20), 128);
+  const readme = await readFile(join(installed, "README.md"), "utf8");
+  assert.match(readme, /https:\/\/raw\.githubusercontent\.com\/nextwebwg\/html-next\/main\/assets\/brand\/html-next-lockup-nuget\.png/);
   const result = await execute("dotnet", ["run", "-c", "Release", "--no-restore", "--nologo"], { cwd: consumer });
   assert.match(result.stdout, /NuGet consumer passed/);
   console.log(`${id} ${version}: packed, restored in an isolated consumer, and rendered escaped HTML through Render and Write.`);

@@ -1,4 +1,13 @@
+[![HTML Next](https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup-nuget.png)](https://nextwebwg.org/html-next/)
+
 # HTML Next for .NET
+
+**Universal components. Built with HTML.**
+
+[Documentation](https://nextwebwg.org/html-next/) · [Source and issues](https://github.com/nextwebwg/html-next)
+
+[![NuGet](https://img.shields.io/nuget/vpre/NextWebWG.HtmlNext?color=245c4f&label=NuGet)](https://www.nuget.org/packages/NextWebWG.HtmlNext)
+[![MIT license](https://img.shields.io/badge/license-MIT-245c4f)](https://github.com/nextwebwg/html-next/blob/main/LICENSE)
 
 Compile a component once, keep the returned .NET template, and render it repeatedly with request data. Render inert HTML, or supply matching built assets and select interactive output for adoption by generated browser factories.
 
