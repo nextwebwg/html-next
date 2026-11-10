@@ -15,12 +15,26 @@ The .NET renderer evaluates component templates and binds application-supplied d
 
 The component language is defined by the [public proposal](https://nextwebwg.org/declarative-components/).
 
+## Full-stack C# and JavaScript
+
+Use C# to render request data into initial HTML. Matching generated JavaScript hydrates that markup and continues its state, computed values and browser interactions. The [full-stack guide](https://nextwebwg.org/html-next/full-stack) provides Node and ASP.NET applications using identical component and browser-module files.
+
+For a runnable C# example, copy the [counter application](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-dotnet/examples/counter), then run `dotnet restore`, `npm install`, `npm run build` and `dotnet run --urls http://localhost:5000`. Open `http://localhost:5000/?start=12`: C# renders the count and its computed double; clicking the hydrated button updates both. Requires .NET 10 and Node 24.
+
+The [C# installation guide](https://nextwebwg.org/html-next/dotnet) starts with a minimal ASP.NET response. Applications own request data; browser modules own ongoing interaction. The current C# example uses the supported JavaScript module `connect` hook; declarative `<handler>` bodies and `on:` attributes are outside the C# compiler's current supported input.
+
+## Rendering performance
+
+[![C# HTML Next uses about 23% to 37% less rendering time than Fluid in five measured retained-template cases](https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/performance/native-fluid-2026-11-10.svg)](https://nextwebwg.org/html-next/performance#csharp-rendering)
+
+Measured against Fluid 2.41.1, the .NET Liquid implementation, with complete equivalent output checked before timing. Three independent runs per revision on one Apple M4 Pro, using .NET 10.0.5. These are warm template-rendering results; see the [data and limitations](https://github.com/nextwebwg/html-next/blob/main/docs/optimize/native-fluid-report.md).
+
 ## Use a retained template
 
-Requires .NET 10. Install the first prerelease:
+Requires .NET 10. Install the prerelease:
 
 ```sh
-dotnet add package NextWebWG.HtmlNext --version 1.0.0-alpha.1
+dotnet add package NextWebWG.HtmlNext --version 1.0.0-alpha.2
 ```
 
 For development against a checkout, use `dotnet add reference /path/to/html-next/packages/html-next-dotnet/src/HtmlNext/HtmlNext.csproj` instead.
@@ -48,7 +62,9 @@ A component's optional `<defs>` region can appear before or after its markup roo
 
 Null and omitted inputs use their declared defaults, or read null when no default exists. A non-null default keeps the accepted value non-null; without a default, the implicit default is null. `required` reports validity and does not supply a default. Empty strings, zero, and false remain present. A missing required input or a value of the wrong type reports through the optional `onDiagnostic` callback and rendering continues with the default or null. Both output APIs report each binding failure once. Compilation errors, cancellation, application getter failures, and output writer failures remain exceptions.
 
-`Render` binds and validates inputs once, counts the output over that snapshot, and fills one exact-size string. Counting does not call application getters or enumerate application data again. Numeric output uses stack-based formatting. `Write` makes one output pass to the supplied writer. Neither path retains pooled output buffers between requests. Diagnostic paths are prepared during compilation rather than constructed for every row.
+`Render` binds and validates inputs once. Simple inert templates make one output pass into a small stack buffer, renting larger arrays when needed before creating the result string. Rented arrays are cleared and returned on success or failure; the shared pool may retain their capacity for reuse. Component graphs, interactive output and module preparation use a counting pass followed by an exact-size string write, reusing their input snapshots. Neither path calls application getters or enumerates application data again. Numeric output uses stack-based formatting. `Write` makes one output pass to the supplied writer. Diagnostic paths are prepared during compilation rather than constructed for every row.
+
+The [native rendering performance report](https://github.com/nextwebwg/html-next/blob/main/docs/optimize/native-fluid-report.md) records repeated comparisons with Fluid, including workload, allocation and measurement limits.
 
 Applications writing directly to a response can use `Write` to avoid allocating the complete HTML string.
 
@@ -177,7 +193,7 @@ Standalone CSS compilation and native validation of imported stylesheet-source f
 
 Build matching client assets with the native unplugin's `hydrate: true` option. The application's browser entry imports `hydrate` from `virtual:html-next/hydrate` and calls it after the server markup is present. Keep that browser bundle, its stylesheets and `html-next.manifest.json` together when deploying. The application owns their URLs and document assembly.
 
-For a minimal Vite build, save the `<template component="x-card">...</template>` source from the retained-template example above as `card.html`, then add these two files beside it. Use `@nextwebwg/html-next` and `@nextwebwg/html-next-unplugin` version `1.0.0-alpha.93` for this native release, alongside Vite.
+For a minimal Vite build, save the `<template component="x-card">...</template>` source from the retained-template example above as `card.html`, then add these two files beside it. Use `@nextwebwg/html-next` and `@nextwebwg/html-next-unplugin` version `1.0.0-alpha.94` for this native release, alongside Vite.
 
 ```js
 // vite.config.js

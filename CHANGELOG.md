@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.94
 
+- Render simple inert .NET templates in one output pass. In the five repeated retained-template cases, native total rendering time fell 30.4%, and the computed cart changed from slower than Fluid to using about 23% less time. Publish this change in `NextWebWG.HtmlNext` `1.0.0-alpha.2`.
+
 - Give the .NET NuGet package the HTML Next gallery icon and a branded README using the shared project assets.
 
 ## 1.0.0-alpha.93

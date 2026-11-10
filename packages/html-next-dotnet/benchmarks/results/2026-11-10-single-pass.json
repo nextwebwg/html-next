@@ -1,0 +1,231 @@
+{
+  "date": "2026-11-10",
+  "method": "Three independent BenchmarkDotNet ShortRun sweeps per revision, three measured iterations per sweep. Compile and parse once outside timed sections. Complete independent expected-output comparison before timing. Ratios aggregate the three within-run ratios by median. Warm context-free inert Render only; not HTTP throughput or interactive graph performance.",
+  "host": {
+    "cpu": "Apple M4 Pro",
+    "os": "macOS 27.2 (26B123)",
+    "dotnetRuntime": "10.0.5",
+    "dotnetSdk": "10.0.201",
+    "benchmarkDotNet": "0.15.8",
+    "fluid": "2.41.1",
+    "angleSharp": "1.10.0"
+  },
+  "originalCommit": "8165073ace16738617fcac6e706ddd981234f9c0",
+  "candidateCommit": "9aa0f4d136d50bb996f56981722a054f1567546b",
+  "candidateSourceSha256": "84de64c239ba0fe1efa943589175f4fd0c08abb23cea658a300b5fedb489f5e2",
+  "cases": [
+    {
+      "name": "card",
+      "validation": {
+        "name": "card",
+        "rows": 0,
+        "bytes": 75,
+        "outputSha256": "35bde7a7db4efb9760819b971219e35b6fa276b9d8a9e784173184d788b68f6d",
+        "templateSha256": "d63428c5c873f732f089d7d262292c7784989ed531ef3766434fa368c76667fa",
+        "liquidSha256": "7c7ef7d35a1fc737293d91f3c4776ef9f1a10483bf62cd5e2cb16f4540a1c828",
+        "modelSha256": "645c51dbbe297f595345a0eab02a906e108c0b18609081ee200560d4f5ef1fcc",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.10.0.0"
+      },
+      "originalNativeNs": [
+        211.25790166854858,
+        209.32894269625345,
+        196.92561356226602
+      ],
+      "nativeNs": [
+        163.98387479782104,
+        160.48343642552695,
+        164.12196238835654
+      ],
+      "fluidNs": [
+        224.12966672579446,
+        228.23169843355814,
+        222.5144240061442
+      ],
+      "nativeFluidRatios": [
+        0.731647341440269,
+        0.7031601549083079,
+        0.7375789822228545
+      ],
+      "medianNativeFluidRatio": 0.731647341440269,
+      "warmAllocatedBytes": {
+        "native": 240,
+        "fluid": 704
+      }
+    },
+    {
+      "name": "cart-100",
+      "validation": {
+        "name": "cart-100",
+        "rows": 100,
+        "bytes": 4227,
+        "outputSha256": "6d004995ac4037a19b7b278d391c61e2ebcef79e46891f20dd0b039714be8a3a",
+        "templateSha256": "24b05b970398860feb5672962d5d0827a9137b014f8eb897358a92675213eefc",
+        "liquidSha256": "5df60c1649be6207fd19a022cb09b5ce6d997efef33c1bb01b80e4790a12d15c",
+        "modelSha256": "c9068fce323131357b750a78337bb83945f730c5df931afabecbe4b8f72c104d",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.10.0.0"
+      },
+      "originalNativeNs": [
+        32316.41133626302,
+        32570.059936523438,
+        30696.247497558594
+      ],
+      "nativeNs": [
+        20789.26171875,
+        21070.03592936198,
+        20918.23578898112
+      ],
+      "fluidNs": [
+        27047.182495117188,
+        27052.963267008465,
+        27110.896850585938
+      ],
+      "nativeFluidRatios": [
+        0.7686294763790303,
+        0.77884391892319,
+        0.7715803687449396
+      ],
+      "medianNativeFluidRatio": 0.7715803687449396,
+      "warmAllocatedBytes": {
+        "native": 19072,
+        "fluid": 54251
+      }
+    },
+    {
+      "name": "list-10",
+      "validation": {
+        "name": "list-10",
+        "rows": 10,
+        "bytes": 589,
+        "outputSha256": "fb48b479b07b9993530dded2dac571fff7999f41a34dfc7a3a4b769e930797bb",
+        "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+        "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+        "modelSha256": "97614a4243bfaebe2d05be8dab8df1f1a99251d249f22ae11aac821107a5a0b8",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.10.0.0"
+      },
+      "originalNativeNs": [
+        1850.71595509847,
+        1793.1758569081624,
+        1776.7335586547852
+      ],
+      "nativeNs": [
+        1325.0898513793945,
+        1302.849027633667,
+        1310.0360768636067
+      ],
+      "fluidNs": [
+        2267.626230875651,
+        2053.804499308268,
+        2083.7762603759766
+      ],
+      "nativeFluidRatios": [
+        0.5843510863197711,
+        0.6343588340917907,
+        0.6286836556182075
+      ],
+      "medianNativeFluidRatio": 0.6286836556182075,
+      "warmAllocatedBytes": {
+        "native": 1984,
+        "fluid": 4648
+      }
+    },
+    {
+      "name": "list-100",
+      "validation": {
+        "name": "list-100",
+        "rows": 100,
+        "bytes": 5989,
+        "outputSha256": "4c56e0194b5004fc2d16775df5d2e417686b9d7122df620c3ee85ee236585240",
+        "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+        "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+        "modelSha256": "e39a426097cace6a6bf2190e8a73466b2718df29aafe2f9d4b586ea152ed1a4f",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.10.0.0"
+      },
+      "originalNativeNs": [
+        17934.433807373047,
+        17888.74139912923,
+        17615.629384358723
+      ],
+      "nativeNs": [
+        12625.96352895101,
+        12353.39049021403,
+        12156.887901306152
+      ],
+      "fluidNs": [
+        18363.666091918945,
+        18595.983947753906,
+        18654.367665608723
+      ],
+      "nativeFluidRatios": [
+        0.6875513563442078,
+        0.6643042134754111,
+        0.6516912349550528
+      ],
+      "medianNativeFluidRatio": 0.6643042134754111,
+      "warmAllocatedBytes": {
+        "native": 19264,
+        "fluid": 37770
+      }
+    },
+    {
+      "name": "list-1000",
+      "validation": {
+        "name": "list-1000",
+        "rows": 1000,
+        "bytes": 61789,
+        "outputSha256": "9202f2e82e1d681907bb5a417734231b27968c5b33545cb0a08f747b9dfe25ce",
+        "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+        "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+        "modelSha256": "7ced73a5e2bb2cd17aa428c7641c5a8ab445be27518662fc54d66f52fdd5f575",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.10.0.0"
+      },
+      "originalNativeNs": [
+        208198.98994954428,
+        208642.46626790366,
+        219308.47509765625
+      ],
+      "nativeNs": [
+        147931.08626302084,
+        146901.13663736978,
+        142240.25122070312
+      ],
+      "fluidNs": [
+        211130.95092773438,
+        213566.70125325522,
+        214210.53560384116
+      ],
+      "nativeFluidRatios": [
+        0.7006603513743208,
+        0.6878466342146149,
+        0.6640208000028571
+      ],
+      "medianNativeFluidRatio": 0.6878466342146149,
+      "warmAllocatedBytes": {
+        "native": 195728,
+        "fluid": 502919
+      }
+    }
+  ],
+  "nativeTotalNs": {
+    "original": {
+      "aggregate": 261103.77240316075,
+      "samples": [
+        260511.80894994736,
+        261103.77240316075,
+        269594.0111517906
+      ]
+    },
+    "candidate": {
+      "aggregate": 181787.89552100498,
+      "samples": [
+        182835.38523689908,
+        181787.89552100498,
+        176789.53295024237
+      ]
+    }
+  }
+}

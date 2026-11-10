@@ -69,6 +69,21 @@ public sealed class RenderingTests
     }
 
     [Fact]
+    public async Task ConcurrentLargeRendersPreserveEscapingAndShorterSubsequentOutput()
+    {
+        var template = HtmlNextCompiler.Compile(Card);
+        await Task.WhenAll(Enumerable.Range(1, 20).Select(index => Task.Run(() =>
+        {
+            var prefix = new string((char)('a' + index), index * 4096);
+            var input = prefix + "👋<&\"";
+            var attribute = prefix + "👋&lt;&amp;&quot;";
+            var text = prefix + "👋&lt;&amp;\"";
+            Assert.Equal("<article title=\"" + attribute + "\"><h2>" + text + "</h2></article>", template.Render(new CardInput(input)));
+            Assert.Equal("<article title=\"short\"><h2>short</h2></article>", template.Render(new CardInput("short")));
+        })));
+    }
+
+    [Fact]
     public void SizesUnicodeAndEscapedOutputWithoutReadingGettersTwice()
     {
         var template = HtmlNextCompiler.Compile(Card);

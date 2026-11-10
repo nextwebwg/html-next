@@ -1,6 +1,11 @@
 <div align="center">
 
-# HTML Next
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup-dark.svg">
+    <img src="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup.svg" alt="HTML Next" width="280">
+  </picture>
+</h1>
 
 ### Universal components. Built with HTML.
 
@@ -18,6 +23,8 @@ Author once. Use native DOM, Vue, React, or Svelte.
 ## Write HTML. Keep your options.
 
 HTML Next brings markup, state, events, slots, and scoped styles together in one component file. Build native DOM with Vite, load components directly in a browser, or generate Vue, React, and Svelte components.
+
+For full-stack applications, [render with Node or C# and hydrate with JavaScript](https://nextwebwg.org/html-next/full-stack). Both runnable examples use identical component definitions: the server renders request data, then browser interaction continues the declared state and computed dependencies. The [C# implementation](https://www.nuget.org/packages/NextWebWG.HtmlNext) is published on NuGet.
 
 ```html
 <template component="x-counter">

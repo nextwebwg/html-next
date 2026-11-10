@@ -1,0 +1,11 @@
+<template component="x-counter" module="./counter.js">
+  <defs>
+    <prop name="start" type="number" default="0">Initial count supplied by the server.</prop>
+    <state name="count" type="number" from="$start"></state>
+    <computed name="doubled" from="$count * 2"></computed>
+  </defs>
+  <section>
+    <button $ref="increment" type="button">Count: {$count}</button>
+    <output>Double: {$doubled}</output>
+  </section>
+</template>

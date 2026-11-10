@@ -19,6 +19,8 @@ Conversion is tested against [Looma’s complete catalog](https://threadlabs.stu
 | --- | --- |
 | Learn to author HTML Next components | [Build your first component](/html-next/quick-start), then [use it natively](/html-next/usage). |
 | Use components in an existing app | [Usage](/html-next/usage) starts with HTML Next and includes Vue, React, Preact, Svelte and Angular setup in its switcher. |
+| Render initial HTML with C# | [Install the NuGet package](/html-next/dotnet), then hydrate with matching JavaScript. |
+| Build a full-stack Node or C# application | [Run the shared counter examples](/html-next/full-stack), including server data and browser interaction. |
 | Publish a component library | [Publish your HTML files](/html-next/ship) with instructions for the consuming app’s Vite plugin. |
 | Generate framework source files | The separate [Converter](/html-next/convert) covers conversion commands and their output. |
 
@@ -28,7 +30,7 @@ See [Performance and size](/html-next/performance) for benchmark results and bun
 
 ## Built on a public proposal
 
-HTML Next is JavaScript tooling for the [Declarative HTML Components](/declarative-components/) and [HTML Forms](/html-forms/) proposals. The component language has one reference: the public proposal. These guides cover installing and using its implementation.
+HTML Next provides JavaScript tooling and a native .NET initial renderer for the [Declarative HTML Components](/declarative-components/) and [HTML Forms](/html-forms/) proposals. The component language has one reference: the public proposal. These guides cover installing and using its implementations.
 
 The tools are in early development and the proposals are at Stage 0. Syntax and generated output may change. Browsers do not support this component syntax on their own; HTML Next runs or builds the definitions for your project.
 
