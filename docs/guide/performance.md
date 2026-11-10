@@ -1,9 +1,9 @@
 ---
 title: Performance
 order: 6
-navGroup: guide
 blurb: browser speed · JavaScript size · C# rendering
 eyebrow: HTML Next · Performance
+navGroup: reference
 ---
 
 # Measured rendering speed and JavaScript size

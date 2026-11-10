@@ -39,7 +39,7 @@ The command supports native, Vue, React, Preact, Svelte, and Angular targets and
 
 Expressive Markdown tooling lives in the independent [expressmark repository](https://github.com/nextwebwg/expressmark).
 
-The [native .NET renderer](https://www.nuget.org/packages/NextWebWG.HtmlNext) compiles reusable template plans and renders C# request data. [Full-stack Node and C# examples](./docs/guide/full-stack.md) use identical component definitions, then hydrate the server output with JavaScript for browser interaction. Start with the [C# installation guide](./docs/guide/dotnet.md); the [API reference](./packages/html-next-dotnet/README.md) records the current supported input and limitations.
+The [native .NET renderer](https://www.nuget.org/packages/NextWebWG.HtmlNext) compiles reusable template plans and renders C# request data. [Full-stack Node and C# examples](./docs/guide/full-stack.md) use identical component definitions, then hydrate the server output with JavaScript for browser interaction. Start with the [C# installation guide](./docs/guide/dotnet.md); the [API reference](./packages/html-next-dotnet/docs/api.md) records the current supported input and limitations.
 
 The tools package implements both proposals it needs:
 [Declarative HTML Components](https://nextwebwg.org/declarative-components/) and

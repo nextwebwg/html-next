@@ -1,9 +1,9 @@
 ---
 title: Build components
 order: 0
-navGroup: guide
 blurb: markup · state · events · bindings
 eyebrow: HTML Next · Build
+navGroup: start
 ---
 
 # Build an HTML Next component

@@ -3,6 +3,7 @@ title: Transitions
 order: 8
 blurb: animate what $if and $each add, remove and move · an optional extension
 eyebrow: HTML Next · Extensions
+navGroup: reference
 ---
 
 # Transitions

@@ -1,9 +1,9 @@
 ---
-title: C# and .NET
+title: C# quick start
 order: 1.5
-navGroup: guide
 blurb: NuGet · initial HTML · JavaScript hydration
 eyebrow: HTML Next · C#
+navGroup: dotnet
 ---
 
 # Render HTML Next with C#
@@ -45,9 +45,30 @@ Run `dotnet run --urls http://localhost:5000` and open `http://localhost:5000/?t
 
 The application obtains request data. The retained template is immutable and can serve concurrent requests; each render owns its input snapshot. `Render` returns a string, and `Write` writes to a `TextWriter`. Both accept cancellation. Use `Validate` for declared root prop constraints.
 
+## Load a component file
+
+Keep the component definition in `components/card.html` and load it during startup:
+
+```csharp
+var source = await File.ReadAllTextAsync("components/card.html");
+var card = HtmlNextCompiler.Compile(source, "components/card.html");
+```
+
+Pass values using the names declared by the HTML component. For example, a C# model's `Title` property can supply the component's `title` prop with `new { title = report.Title }`.
+
+## Check prop constraints
+
+`Validate` returns errors for the root component's declared prop constraints. Applications choose how to present those errors:
+
+```csharp
+var model = new { title = "Quarterly report" };
+var errors = card.Validate(model);
+var html = card.Render(model);
+```
+
 ## Keep the page interactive
 
-The [full-stack guide](/html-next/full-stack) supplies runnable Node and C# applications using identical component and browser-module files. Both render a count and a computed double on the server. JavaScript then adopts the rendered elements, connects the module and continues updating the declared graph when the user clicks.
+The [C# hydration guide](/html-next/dotnet-hydration) walks through a complete ASP.NET application. C# renders a count and its computed double; JavaScript hydrates the result and updates both on a click.
 
 The C# setup has three steps:
 
@@ -69,5 +90,5 @@ The comparison uses Fluid 2.41.1, the .NET Liquid implementation, and checks com
 
 - [NuGet package](https://www.nuget.org/packages/NextWebWG.HtmlNext)
 - [Complete C# counter application](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-dotnet/examples/counter)
-- [Renderer API and supported input](https://github.com/nextwebwg/html-next/blob/main/packages/html-next-dotnet/README.md): component graphs, source resolution, stylesheets, prop validation and application-prepared module data.
+- [Renderer API and supported input](https://github.com/nextwebwg/html-next/blob/main/packages/html-next-dotnet/docs/api.md): component graphs, source resolution, stylesheets, prop validation and application-prepared module data.
 - [Full-stack Node and C#](/html-next/full-stack)

@@ -1,9 +1,9 @@
 ---
 title: Full-stack Node and C#
 order: 1.6
-navGroup: guide
 blurb: one component · two server hosts · browser interactivity
 eyebrow: HTML Next · Full stack
+navGroup: reference
 ---
 
 # One component, Node or C# on the server
@@ -100,7 +100,7 @@ var html = counter.Render(new { start = 12 }, cancellationToken,
     options: new HtmlNextRenderOptions { Interactive = true });
 ```
 
-The [complete ASP.NET example](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-dotnet/examples/counter) supplies `Program.cs`, the project file and static asset setup. [C# and .NET](/html-next/dotnet) starts with an installation and a minimal server response; the [API reference](https://github.com/nextwebwg/html-next/blob/main/packages/html-next-dotnet/README.md) describes source graphs, validation and prepared data.
+The [complete ASP.NET example](https://github.com/nextwebwg/html-next/tree/main/packages/html-next-dotnet/examples/counter) supplies `Program.cs`, the project file and static asset setup. [C# and .NET](/html-next/dotnet) starts with an installation and a minimal server response; the [API reference](https://github.com/nextwebwg/html-next/blob/main/packages/html-next-dotnet/docs/api.md) describes source graphs, validation and prepared data.
 
 ## Build and hydrate the browser side
 
@@ -130,7 +130,7 @@ Run the frontend build before starting either server. Deploy the matching compon
 
 The server owns request data and initial rendering. The generated browser factories adopt the initial elements, restore their state and connect the module. Browser modules own later events, refreshes and subscriptions. C# does not need a JavaScript engine to evaluate this component's declared initial dataflow.
 
-The example uses the supported module `connect` hook for browser behavior. The current C# compiler's supported input excludes declarative `<handler>` bodies and `on:` attributes; see its [implementation status](https://github.com/nextwebwg/html-next/blob/main/packages/html-next-dotnet/README.md#implementation-status).
+The example uses the supported module `connect` hook for browser behavior. The current C# compiler's supported input excludes declarative `<handler>` bodies and `on:` attributes; see its [implementation status](https://github.com/nextwebwg/html-next/blob/main/packages/html-next-dotnet/docs/api.md#implementation-status).
 
 ## Why the graph travels between hosts
 

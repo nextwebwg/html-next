@@ -3,6 +3,7 @@ title: HTML Forms
 order: 5
 blurb: request construction · fetch enhancement
 eyebrow: HTML Next · Forms
+navGroup: reference
 ---
 
 # HTML Forms

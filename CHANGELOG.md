@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.94
 
+- Organize the tools guide into Vite/browser, converter and C# paths. Keep the NuGet README focused on a runnable C# quick start, with separate hydration documentation and an API reference.
+
 - Add runnable full-stack Node and ASP.NET examples with identical HTML component dataflow, initial request rendering and JavaScript hydration. Publish installation and deployment guides for the NuGet renderer.
 - Use the official HTML Next logo across the npm packages and publish versioned rendering evidence for the native .NET renderer.
 
