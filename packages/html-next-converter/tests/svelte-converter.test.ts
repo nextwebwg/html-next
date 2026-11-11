@@ -166,6 +166,28 @@ it("preserves escaped literal braces inside rich bound-select option text", asyn
   }
 });
 
+it("lays out nested markup with two spaces while preserving rendered whitespace", async () => {
+  const root = await mkdtemp(join(tmpdir(), "html-next-svelte-layout-"));
+  temporary.push(root);
+  await writeFile(join(root, "layout.html"), `<template component="x-layout" noforward><div>
+    <p><strong>Package:</strong> <code>x</code> and <em>a</em> <em>b</em></p>
+    <ul><li>First long item with enough text to wrap the parent</li><li>Second long item with enough text to wrap the parent</li></ul>
+    <pre><b>First long preformatted item with enough text to wrap</b><b>Second long preformatted item with enough text to wrap</b></pre>
+  </div></template>`);
+  const outDirectory = join(root, "out");
+  const manifest = await convertComponents({ mode: "library", target: "svelte", root, outDirectory, entries: ["layout.html"] });
+  const source = await readFile(join(outDirectory, manifest.components[0]!.artifact), "utf8");
+  assert.doesNotMatch(source, /\t/);
+  assert.match(source, />\n  <p>/);
+  assert.match(source, /<\/pre>\n<\/div>/);
+  const html = await serverHtml(outDirectory, "XLayout", source);
+  const fragment = parseFragment(html);
+  const text = (node: DefaultTreeAdapterTypes.Node): string => node.nodeName === "#text"
+    ? (node as DefaultTreeAdapterTypes.TextNode).value
+    : "childNodes" in node ? node.childNodes.map(text).join("") : "";
+  assert.equal(text(fragment), "Package: x and a bFirst long item with enough text to wrap the parentSecond long item with enough text to wrap the parentFirst long preformatted item with enough text to wrapSecond long preformatted item with enough text to wrap");
+});
+
 it("lowers state, computed text, and declarative handlers to Svelte runes", async () => {
   const root = await mkdtemp(join(tmpdir(), "html-next-svelte-reactive-"));
   temporary.push(root);
