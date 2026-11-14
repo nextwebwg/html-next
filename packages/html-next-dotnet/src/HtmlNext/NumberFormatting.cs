@@ -151,26 +151,24 @@ internal sealed class NumberFormatting(ExpressionValue options)
         return valid;
     }
 
-    private static readonly Dictionary<string, string> Units = new(StringComparer.Ordinal);
-    static NumberFormatting()
+    private static readonly HashSet<string> Units = new(StringComparer.Ordinal)
     {
-        foreach (var (family, names) in new (string, string)[]
-        {
-            ("area", "acre hectare"), ("digital", "bit byte gigabit gigabyte kilobit kilobyte megabit megabyte petabyte terabit terabyte"),
-            ("temperature", "celsius fahrenheit"), ("length", "centimeter foot inch kilometer meter mile mile-scandinavian millimeter yard"),
-            ("duration", "day hour microsecond millisecond minute month nanosecond second week year"), ("angle", "degree"),
-            ("volume", "fluid-ounce gallon liter milliliter"), ("mass", "gram kilogram ounce pound stone"), ("concentr", "percent")
-        }) foreach (var name in names.Split(' ')) Units.Add(name, family + "-" + name);
-    }
+        "acre", "hectare",
+        "bit", "byte", "gigabit", "gigabyte", "kilobit", "kilobyte", "megabit", "megabyte", "petabyte", "terabit", "terabyte",
+        "celsius", "fahrenheit",
+        "centimeter", "foot", "inch", "kilometer", "meter", "mile", "mile-scandinavian", "millimeter", "yard",
+        "day", "hour", "microsecond", "millisecond", "minute", "month", "nanosecond", "second", "week", "year",
+        "degree", "fluid-ounce", "gallon", "liter", "milliliter", "gram", "kilogram", "ounce", "pound", "stone", "percent"
+    };
+
     private static bool Unit(string name, out string skeleton)
     {
         var parts = name.Split("-per-", StringSplitOptions.None);
         skeleton = "";
-        if (parts.Length is < 1 or > 2 || !Units.TryGetValue(parts[0], out var numerator)) return false;
-        skeleton = "measure-unit/" + numerator;
-        if (parts.Length == 1) return true;
-        if (!Units.TryGetValue(parts[1], out var denominator)) return false;
-        skeleton += " per-measure-unit/" + denominator;
+        if (parts.Length > 2 || !Units.Contains(parts[0]) || (parts.Length == 2 && !Units.Contains(parts[1]))) return false;
+        // Preserve ICU's measure-unit field for Intl formatParts when percent is a unit.
+        // Core identifiers for other units are independent of ICU's legacy unit categories.
+        skeleton = name == "percent" ? "measure-unit/concentr-percent" : "unit/" + name;
         return true;
     }
 }

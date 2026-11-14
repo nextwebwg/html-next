@@ -52,6 +52,8 @@ public sealed class FormattingTests
     [InlineData("format(15%, {}, 'en-US')", "15%")]
     [InlineData("format(15%, 'number', {}, 'en-US')", "0.15")]
     [InlineData("format(2.5, 'unit', { unit: 'mile-per-hour', unitDisplay: 'long' }, 'en-US')", "2.5 miles per hour")]
+    [InlineData("format(2.5, 'unit', { unit: 'liter-per-second', unitDisplay: 'long' }, 'en-US')", "2.5 liters per second")]
+    [InlineData("format(2.5, 'unit', { unit: 'mile-per-gallon', unitDisplay: 'long' }, 'en-US')", "2.5 miles per gallon")]
     [InlineData("format(1.005, { maximumFractionDigits: 2 }, 'en-US')", "1.01")]
     [InlineData("format(1.25, { maximumFractionDigits: 1, roundingMode: 'halfEven' }, 'en-US')", "1.2")]
     [InlineData("format(12345, { useGrouping: false, minimumFractionDigits: 2 }, 'en-US')", "12345.00")]
