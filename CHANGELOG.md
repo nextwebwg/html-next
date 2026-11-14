@@ -8,6 +8,8 @@
 
 ## 1.0.0-alpha.94
 
+- Preserve native .NET volume and compound measurement formatting across ICU releases in `NextWebWG.HtmlNext` `1.0.0-alpha.2`.
+
 - Organize the tools guide into Vite/browser, converter and C# paths. Keep the NuGet README focused on a runnable C# quick start, with separate hydration documentation and an API reference.
 
 - Add runnable full-stack Node and ASP.NET examples with identical HTML component dataflow, initial request rendering and JavaScript hydration. Publish installation and deployment guides for the NuGet renderer.
