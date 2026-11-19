@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-alpha.96
+
+- Route eligible Linux checks through organization runners. Keep browser qualification and its reuse planning on GitHub-hosted Linux after independent Firefox startup and navigation failures on the organization pool.
+
 ## 1.0.0-alpha.95
 
 - Render nested package components as native controls when importing a standalone Vanilla factory.

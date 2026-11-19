@@ -18,7 +18,8 @@ concurrency:
 jobs:
   changes:
     name: Affected packages
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    # Browser reuse records the kernel here, so plan on the same hosted runner as the browser checks.
+    runs-on: ubuntu-latest
     timeout-minutes: 1
     outputs:
       node: ${{ steps.plan.outputs.node }}
@@ -137,7 +138,8 @@ jobs:
     name: Browser ${{ matrix.name }}
     needs: changes
     if: needs.changes.outputs.has_browser == 'true' && needs.changes.outputs.browser_reused != 'true'
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    # Firefox had independent startup and navigation failures on the organization pool.
+    runs-on: ubuntu-latest
     # Immutable browser userspace includes all three engines and OS libraries.
     container:
       image: ${{ needs.changes.outputs.browser_image }}
