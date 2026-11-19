@@ -2,7 +2,7 @@
 
 ## 1.0.0-alpha.96
 
-- Route eligible Linux checks through organization runners. Keep browser qualification and its reuse planning on GitHub-hosted Linux after independent Firefox startup and navigation failures on the organization pool.
+- Route eligible Linux checks through organization runners. Keep browser qualification, browser reuse planning, and the 36-shard catalog qualification on GitHub-hosted Linux. The organization pool remains available to smaller checks.
 
 ## 1.0.0-alpha.95
 
