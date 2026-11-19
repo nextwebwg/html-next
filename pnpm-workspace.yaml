@@ -36,7 +36,7 @@ catalog:
   postcss: 8.5.33
   playwright: 1.65.1
   pota: 0.22.235
-  reactive-framework-test-suite: 0.2.0
+  reactive-framework-test-suite: 0.1.0
   react: 19.3.1
   react-dom: 19.3.1
   s-js: 0.4.9

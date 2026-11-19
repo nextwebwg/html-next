@@ -114,10 +114,10 @@
   },
   "dependencies": {
     "@dprint/formatter": "^0.6.0",
-    "@dprint/typescript": "^0.101.0",
+    "@dprint/typescript": "^0.96.1",
     "@formatjs/intl-durationformat": "0.13.0",
     "dprint-plugin-malva": "^0.16.1",
-    "dprint-plugin-markup": "^0.28.0",
+    "dprint-plugin-markup": "^0.27.5",
     "jsdom": "31.0.1",
     "parse5": "catalog:",
     "postcss": "catalog:",
