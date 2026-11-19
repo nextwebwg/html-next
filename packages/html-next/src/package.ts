@@ -11,7 +11,7 @@ import type { ComponentPackageConfig } from "./package-config.js";
 import { commonDirectory } from "./controller-files.js";
 import { writeHostFiles } from "./host-declarations.js";
 import { parseComponentResource } from "./source-graph.js";
-import type { ComponentDefinition } from "./template.js";
+import { definitionMayInvokeComponents, type ComponentDefinition } from "./template.js";
 
 export interface AssembledPackage {
   readonly components: readonly string[];
@@ -197,6 +197,10 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
   }
   // Every definition is read first, so each component's invocations are typed by the contracts it invokes.
   const byTag = new Map(definitions.map((definition) => [definition.contract.tag, definition] as const));
+  // Vanilla emits sibling imports only for factories its template actually calls.
+  const invocations = new Map(definitions.map(definition => [definition.contract.tag, {
+    module: `./${definition.contract.name}.js`, definition,
+  }] as const));
   if (config.hostTypes === true) {
     await writeHostFiles(sourceDefinitions, new Map(sourceDefinitions.map(({ definition }) => [definition.contract.tag, definition] as const)));
   }
@@ -204,7 +208,8 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     const controller = controllers.get(definition.contract.tag);
     const modulePreparation = controller === undefined || definition.module === undefined ? undefined
       : await preparedModuleRevision(controller, definition, config.version, path => readFile(moduleSources.get(path)!, "utf8"));
-    for (const artifact of generateComponent(generatedDefinition(definition, controller), { definitions: byTag,
+    for (const artifact of generateComponent(generatedDefinition(definition, controller), { definitions: byTag, invocations,
+      guardNestedDepth: definitionMayInvokeComponents(definition),
       ...(modulePreparation === undefined ? {} : { modulePreparation }) })) {
       if (files.has(artifact.path)) throw new Error(`Package artifact collision at ${artifact.path}.`);
       files.set(artifact.path, artifact.content);
