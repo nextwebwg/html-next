@@ -1,0 +1,206 @@
+[
+  {
+    "name": "boolean-presence",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"active\" type=\"boolean\" default=\"false\">Active.</prop></defs><b from:title=\"$active\" from:id=\"not(not($active))\">Value</b></template>",
+    "model": {
+      "active": true
+    },
+    "expected": "<b title=\"\" id=\"\">Value</b>"
+  },
+  {
+    "name": "enumerated-false",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"active\" type=\"boolean\" default=\"false\">Active.</prop></defs><b from:aria-expanded=\"$active\" from:contenteditable=\"$active\" from:draggable=\"$active\" from:spellcheck=\"$active\" from:data-value=\"$active\">Value</b></template>",
+    "model": {},
+    "expected": "<b aria-expanded=\"false\" contenteditable=\"false\" draggable=\"false\" spellcheck=\"false\">Value</b>"
+  },
+  {
+    "name": "boolean-attribute-string",
+    "source": "<template component=\"x-attributes\"><defs></defs><button from:disabled=\"'false'\" from:role=\"'button'\">Value</button></template>",
+    "model": {},
+    "expected": "<button disabled=\"false\" role=\"button\">Value</button>"
+  },
+  {
+    "name": "nested-list-text",
+    "source": "<template component=\"x-attributes\"><defs></defs><b from:class=\"['a', false, 0, null, ['b', 'c'], {x: 1}]\">Value</b></template>",
+    "model": {},
+    "expected": "<b class=\"a false 0  b c \">Value</b>"
+  },
+  {
+    "name": "token-list-prop",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"tokens\" type=\"list(string)\">Tokens.</prop></defs><a from:rel=\"$tokens\">Open</a></template>",
+    "model": {
+      "tokens": [
+        "a",
+        "&",
+        "\"b\""
+      ]
+    },
+    "expected": "<a rel=\"a &amp; &quot;b&quot;\">Open</a>"
+  },
+  {
+    "name": "object-removes",
+    "source": "<template component=\"x-attributes\"><defs></defs><b from:title=\"{answer: 42}\">Value</b></template>",
+    "model": {},
+    "expected": "<b>Value</b>"
+  },
+  {
+    "name": "absence-removes",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"rows\" type=\"list(string)\">Rows.</prop></defs><b from:title=\"$rows[9]\">Value</b></template>",
+    "model": {
+      "rows": []
+    },
+    "expected": "<b>Value</b>"
+  },
+  {
+    "name": "relative-url",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"url\" type=\"string\">URL.</prop></defs><a from:href=\"$url\">Open</a></template>",
+    "model": {
+      "url": "../page?q=✓&x=2"
+    },
+    "expected": "<a href=\"../page?q=✓&amp;x=2\">Open</a>"
+  },
+  {
+    "name": "control-obscured-url",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"url\" type=\"string\">URL.</prop></defs><a from:href=\"$url\">Open</a></template>",
+    "model": {
+      "url": " \u0000jAvA\nScRiPt:alert(1)"
+    },
+    "expected": "<a>Open</a>"
+  },
+  {
+    "name": "other-url-targets",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"url\" type=\"string\">URL.</prop></defs><div><img from:src=\"$url\" from:poster=\"$url\"><form from:action=\"$url\"><button from:formaction=\"$url\">Go</button></form></div></template>",
+    "model": {
+      "url": "DATA:text/html,test"
+    },
+    "expected": "<div><img><form><button>Go</button></form></div>"
+  },
+  {
+    "name": "concatenated-url",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"tail\" type=\"string\" default=\"run()\">Tail.</prop></defs><a from:href=\"concat('java', 'script:', $tail)\">Open</a></template>",
+    "model": {},
+    "expected": "<a>Open</a>"
+  },
+  {
+    "name": "joined-url",
+    "source": "<template component=\"x-attributes\"><defs></defs><a from:href=\"['java', 'script:', false]\">Open</a></template>",
+    "model": {},
+    "expected": "<a>Open</a>"
+  },
+  {
+    "name": "numeric-url",
+    "source": "<template component=\"x-attributes\"><defs></defs><a from:href=\"1 / 10\">Open</a></template>",
+    "model": {},
+    "expected": "<a href=\"0.1\">Open</a>"
+  },
+  {
+    "name": "svg-adjusted-names",
+    "source": "<template component=\"x-attributes\"><defs></defs><div><svg from:viewBox=\"'0 0 10 10'\"><path from:d=\"'M0 0'\" from:preserveAspectRatio=\"'none'\"></path><use from:xlink:href=\"'#icon'\"></use></svg></div></template>",
+    "model": {},
+    "expected": "<div><svg viewBox=\"0 0 10 10\"><path d=\"M0 0\" preserveAspectRatio=\"none\"></path><use xlink:href=\"#icon\"></use></svg></div>"
+  },
+  {
+    "name": "svg-literal-namespace",
+    "source": "<template component=\"x-attributes\"><defs></defs><div><svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"><use xlink:href=\"#icon\" xml:lang=\"en\"></use></svg></div></template>",
+    "model": {},
+    "expected": "<div><svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"><use xlink:href=\"#icon\" xml:lang=\"en\"></use></svg></div>"
+  },
+  {
+    "name": "svg-executable-url",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"url\" type=\"string\">URL.</prop></defs><div><svg><use from:xlink:href=\"$url\"></use></svg></div></template>",
+    "model": {
+      "url": "vbscript:run()"
+    },
+    "expected": "<div><svg><use></use></svg></div>"
+  },
+  {
+    "name": "safe-concatenated-url",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"query\" type=\"string\" default=\"quiet\">Query.</prop></defs><a from:href=\"concat('/page?q=', $query, '&amp;view=full')\">Open</a></template>",
+    "model": {},
+    "expected": "<a href=\"/page?q=quiet&amp;view=full\">Open</a>"
+  },
+  {
+    "name": "joined-url-separator",
+    "source": "<template component=\"x-attributes\"><defs><prop name=\"query\" type=\"string\" default=\"quiet\">Query.</prop></defs><a from:href=\"join(['java', 'script:'], '')\">Open</a></template>",
+    "model": {},
+    "expected": "<a>Open</a>"
+  },
+  {
+    "name": "svg-default-namespace",
+    "source": "<template component=\"x-attributes\"><defs></defs><div><svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 0\"></path></svg></div></template>",
+    "model": {},
+    "expected": "<div><svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 0\"></path></svg></div>"
+  },
+  {
+    "name": "invalid-literal-fallback",
+    "source": "<template component=\"x-attributes\"><b title=\"fallback\" from:title=\"1 / 0\">Value</b></template>",
+    "model": {},
+    "expected": "<b title=\"fallback\">Value</b>"
+  },
+  {
+    "name": "invalid-binding-first",
+    "source": "<template component=\"x-attributes\"><b from:title=\"1 / 0\" title=\"fallback\">Value</b></template>",
+    "model": {},
+    "expected": "<b title=\"fallback\">Value</b>"
+  },
+  {
+    "name": "accepted-replaces-fallback",
+    "source": "<template component=\"x-attributes\"><b title=\"fallback\" from:title=\"'accepted'\">Value</b></template>",
+    "model": {},
+    "expected": "<b title=\"accepted\">Value</b>"
+  },
+  {
+    "name": "null-removes-fallback",
+    "source": "<template component=\"x-attributes\"><b title=\"fallback\" from:title=\"null\">Value</b></template>",
+    "model": {},
+    "expected": "<b>Value</b>"
+  },
+  {
+    "name": "false-removes-fallback",
+    "source": "<template component=\"x-attributes\"><b title=\"fallback\" from:title=\"false\">Value</b></template>",
+    "model": {},
+    "expected": "<b>Value</b>"
+  },
+  {
+    "name": "empty-replaces-fallback",
+    "source": "<template component=\"x-attributes\"><b title=\"fallback\" from:title=\"''\">Value</b></template>",
+    "model": {},
+    "expected": "<b title=\"\">Value</b>"
+  },
+  {
+    "name": "invalid-url-fallback",
+    "source": "<template component=\"x-attributes\"><a href=\"#fallback\" from:href=\"1 / 0\">Open</a></template>",
+    "model": {},
+    "expected": "<a href=\"#fallback\">Open</a>"
+  },
+  {
+    "name": "unsafe-removes-fallback",
+    "source": "<template component=\"x-attributes\"><a href=\"#fallback\" from:href=\"'javascript:alert(1)'\">Open</a></template>",
+    "model": {},
+    "expected": "<a>Open</a>"
+  },
+  {
+    "name": "invalid-svg-fallback",
+    "source": "<template component=\"x-attributes\"><div><svg><use xlink:href=\"#fallback\" from:xlink:href=\"1 / 0\"></use></svg></div></template>",
+    "model": {},
+    "expected": "<div><svg><use xlink:href=\"#fallback\"></use></svg></div>"
+  },
+  {
+    "name": "invalid-concat-fallback",
+    "source": "<template component=\"x-attributes\"><a href=\"#fallback\" from:href=\"concat('#', 1 / 0)\">Open</a></template>",
+    "model": {},
+    "expected": "<a href=\"#fallback\">Open</a>"
+  },
+  {
+    "name": "invalid-join-fallback",
+    "source": "<template component=\"x-attributes\"><a href=\"#fallback\" from:href=\"join(['#', concat(1 / 0)], '')\">Open</a></template>",
+    "model": {},
+    "expected": "<a href=\"#fallback\">Open</a>"
+  },
+  {
+    "name": "invalid-list-fallback",
+    "source": "<template component=\"x-attributes\"><a href=\"#fallback\" from:href=\"['value', 1 / 0]\">Open</a></template>",
+    "model": {},
+    "expected": "<a href=\"#fallback\">Open</a>"
+  }
+]

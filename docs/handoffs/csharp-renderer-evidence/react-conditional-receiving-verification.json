@@ -1,0 +1,109 @@
+{
+  "checkpoint": "Retain React and Preact ordinary content across conditional and receiving outlets",
+  "baseCommit": "f120e4922d988792001a952766b327779f715f01",
+  "branch": "matthew-dean/c-renderer-handoff-goal",
+  "releaseVersion": "1.0.0-alpha.92",
+  "goalStatus": "active",
+  "shipReady": false,
+  "changes": [
+    "Select removable ordinary outlets with the existing shared template lifetime analysis, excluding declared scoped slots.",
+    "Retain filtered receiving projection together with its existing accepting registry, including a receiver that is itself accepted.",
+    "Let existing portal containers own retained root removal; preserve ordinary controller root cleanup.",
+    "Use native framework context to notify nested retained outlets when an ancestor range moves without unmounting.",
+    "Carry native React aggregate effects and pending work along the destination path so nested subscriptions still mount after source adoption."
+  ],
+  "proofBeforeFix": [
+    {
+      "case": "Single direct conditional outlet",
+      "observation": "Baseline recreates the original edited input when the destination reopens."
+    },
+    {
+      "case": "Receiving projection",
+      "observation": "Baseline server rendering loses the accepted child context."
+    },
+    {
+      "case": "Converted root during StrictMode cleanup",
+      "observation": "Original ref cleanup pulled the retained span out of its parked source range."
+    },
+    {
+      "case": "Nested receiver",
+      "observation": "Borrowed detail remained at count zero because adoption lost the inner accepting registry."
+    },
+    {
+      "case": "Filtered empty source",
+      "observation": "Wrapping empty content in a provider hid FirstFallback."
+    },
+    {
+      "case": "Existing production React shared case",
+      "observation": "After 156 broad passes, a transfer displayed OwnFallbackPlain. Runtime inspection found the moved outlet missing its store subscription. Native passive-effect traversal skipped the destination path without aggregate effect flags. Existing Chromium React/Preact dev/prod assertions pass after preserving native flags and work."
+    }
+  ],
+  "verification": {
+    "browser": {
+      "code": 0,
+      "seconds": 436.827555916,
+      "log": ".context/react-conditional-qualified.log",
+      "firefoxHost": "Linux arm64 Docker",
+      "image": "mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f",
+      "casesPassed": 191,
+      "skipped": 0,
+      "files": 4,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "workers": 1,
+      "groups": {
+        "existingReactPreactColumns": 119,
+        "actualFrameworkHydration": 12,
+        "singleConditional": 6,
+        "receiving": 6,
+        "sevenTargetDevProdShared": 42,
+        "existingControllerCleanup": 6
+      },
+      "newCases": "Each new case covers fresh mounting and real SSR hydration. Conditional sources include direct, ancestor, match, initially closed and lazy destinations. Receiving cases include compiled, native and nested native consumers, filtering, empty fallback, original edited input/state/context, parked updates and cleanup."
+    },
+    "repository": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "seconds": 454.6476747499837,
+      "log": ".context/react-conditional-verify-pr.log",
+      "javascriptPassed": 2089,
+      "javascriptGatedSkips": 5003,
+      "nativePassed": 844,
+      "nativeSkipped": 0,
+      "packedConsumersPassed": 8,
+      "includesVerifyInner": true
+    },
+    "focused": [
+      "Eight Chromium hydration/conditional/receiving cases passed before the flags fix.",
+      "Four unchanged Chromium React/Preact dev/prod shared cases passed after the flags fix.",
+      "Two ordinary named/default button bundle pruning cases passed."
+    ],
+    "preFixBroadRuns": "The earlier 156-pass/one-failure browser run is not qualification. The earlier 564.93-second verify:pr predates the final native flags fix. Both are archived separately as pre-flags.",
+    "warnings": "The unchanged controller cleanup fixture emits an esbuild import.meta warning for an IIFE bundle. Invalid-input fixtures emit expected diagnostics."
+  },
+  "sourceSha256": {
+    "CHANGELOG.md": "1a9646c676774da2c508aa4223bf77118d0c451c8cc3e3a5a18527d63f025c40",
+    "packages/html-next-converter/tests/fixtures/plain-slot-rendering.ts": "226f63743b4ae94591f1adbc85c1c285012dbad490d8b477e2664c308314cc96",
+    "packages/html-next-converter/tests/react-plain-hydration-parity.test.ts": "6e3407f50914268ab7ac812ee7dae86d8a77ae8a45e37fdbbf2c80d07bb4c1f0",
+    "packages/html-next/src/targets/react-plain-native-source.ts": "8e63e20b99c06915d0d02c5b2a73dc463983e1cfc06467555cff2126380900f9",
+    "packages/html-next/src/targets/react-plain-source.ts": "78f7c4892ac45481d92f29a82eea91e7cd40e83cc9c442049262038567073fb3",
+    "packages/html-next/src/targets/react-render.ts": "25b570c13d566009ccbb5ad60c07df245b506a7c09cc8a801bc01208f51009af",
+    "packages/html-next/src/targets/react.ts": "613a8a22ea2402cf01b46365ef79c69b9fd67e4ca7d6fcf48929c90a64ca5cf3"
+  },
+  "review": {
+    "mode": "single inline bounded ce-code-review",
+    "depth": "lite",
+    "actionableFindings": 0,
+    "scope": "This converter correctness unit only. Full C# ship-ready review remains unfinished."
+  },
+  "limits": [
+    "No C# implementation changed in this unit.",
+    "No complete Looma catalog qualification or feature latency/allocation/retained/peak-memory claim.",
+    "Native handoff uses React 19.3.0 and Preact 11.1.0 internals already in the implementation; future framework compatibility needs qualification. No peer range restriction or dependency was added.",
+    "Full native preparation, rendered-form and interoperable hydration, shared minimum-client delivery, remaining native language/styles/formatting/validation, full catalog checks, fair Fluid/Node measurements and whole-goal release readiness remain unfinished.",
+    "No MarkupKit port, specification change, new name handling, PR, release, publication, visibility change or branch rename."
+  ]
+}

@@ -1,0 +1,185 @@
+{
+  "checkpoint": "Svelte retained plain slot ownership, based on fdd7f69d",
+  "baseCommit": "fdd7f69dfdd8756f0785c04648544217e3b222c1",
+  "branch": "matthew-dean/c-renderer-handoff-goal",
+  "releaseVersion": "1.0.0-alpha.92",
+  "goalStatus": "active",
+  "shipReady": false,
+  "proposal": {
+    "repository": "nextwebwg/specs",
+    "commit": "ee83bc361313d3f2a30868bd890a606ac298091d",
+    "references": [
+      "html-next/components.md#content-that-renders-on-demand",
+      "html-next/components.md#slot-of"
+    ]
+  },
+  "changes": [
+    "Shared retainedSlotNames analysis selects repeated and removable ordinary destinations. Accepted as-list children share one source frame between own and borrowed outlets. Scoped and authored lazy template snippets remain fresh. An ordinary named/default button browser bundle regression verifies retention machinery is pruned.",
+    "Generated plain.js and plain.d.ts bridge native Svelte effect roots, snippets, marked ranges and transition lifetimes. Generated rune code owns reactive lookup and child lists. No wrapper element, cloned source DOM or additional application mount is introduced. Connection observation uses the existing shared document mutation hub.",
+    "Stable source bounds and destination identities preserve nodes, edited controls, state and context through transfers and child-list changes. Empty conditional source presence is separate from destination lifetime so fallbacks appear and returning content retains first placement.",
+    "Filter rejected native elements and text through transparent accepting projection templates. Client literal input defaults use defaultValue/defaultChecked to preserve pre-hydration edits; server output remains declarative attributes.",
+    "Accepted children registered through Svelte consumers or presets dispose their retained frames when their source is destroyed. Compiler-owned lists retain their separate source-owned disposal path."
+  ],
+  "proofBeforeFix": [
+    {
+      "case": "Own/borrowed/repeated plain slots",
+      "observation": "Public Svelte shared conformance rendered BorrowedFallback for borrowed-first and unplaced sources, and duplicated ordinary repeated content."
+    },
+    {
+      "case": "Conditional accepted source disappearance and return",
+      "observation": "New public assertion first found an empty paragraph instead of BorrowedFallback. Dropping logical slot metadata then let a later own outlet claim returning content. Carry presence separately and preserve destination ownership while replacing its body with fallback."
+    },
+    {
+      "case": "Wrapped preset retained source disposal",
+      "observation": "Chromium mounts and disposes a preset's retained plain content failed after complete unmount: shared document observer subscribers 1, expected 0. The same test passed after source onDestroy disposed registered child frames. Six fresh/hydration cases cover all three engines in the final gate."
+    }
+  ],
+  "verification": {
+    "repositoryGate": {
+      "status": "pass",
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "seconds": 413.5561734170187,
+      "includes": [
+        "verify:inner",
+        "lint",
+        "typecheck",
+        "JavaScript tests",
+        "generated artifacts",
+        "runtime size checks",
+        "native tests and complete Fluid outputs",
+        "build",
+        "packed consumers"
+      ],
+      "javascript": {
+        "passed": 2087,
+        "gatedSkips": 4981,
+        "filesPassed": 116,
+        "filesGated": 140,
+        "seconds": 332.02
+      },
+      "native": {
+        "passed": 844,
+        "skipped": 0,
+        "completeFluidOutputsValidated": 5
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "seconds": 60.38
+      }
+    },
+    "browserGate": {
+      "status": "pass",
+      "command": "HTMLNEXT_FIREFOX_ENDPOINT=<owned Linux browser endpoint> corepack pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts packages/html-next-converter/tests/svelte-columns-parity.test.ts packages/html-next-converter/tests/svelte-columns-consumer-parity.test.ts packages/html-next-converter/tests/svelte-control-parity.test.ts packages/html-next-converter/tests/svelte-select-hydration-parity.test.ts --testNamePattern \"Svelte columns as markup|Svelte native-control|Svelte select hydration| svelte \" --maxWorkers=1",
+      "passed": 76,
+      "filtered": 36,
+      "filesPassed": 5,
+      "seconds": 122.76016324999999,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "firefoxHost": "Linux arm64 Docker",
+      "firefoxImage": "mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f",
+      "assertions": [
+        "Independent own/borrowed/repeated ordinary-content structures",
+        "Actual framework SSR and hydrate plus fresh rendering",
+        "Original native inputs, pre-hydration edits, updates and transfers",
+        "Stateful counter, context, live source conditions, reconnect and removal",
+        "Empty conditional source falls back and returns to first placement",
+        "Both named and default lazy templates instantiate afresh",
+        "Svelte consumer tables with keyed movement and preset composition",
+        "Wrapped preset source cleanup releases all document observer subscriptions",
+        "Native-control computed style/pixel parity",
+        "Select hydration, selected/default values and reset behavior"
+      ]
+    },
+    "minimumVersionBridge": {
+      "version": "5.57.1",
+      "installedVersion": "5.57.2",
+      "fresh": "pass",
+      "actualSsrHydration": "pass",
+      "assertions": [
+        "Arbitrary hand-written Svelte child context and props.id",
+        "Same pre-edited native input and same counter through transfers",
+        "Conditional source updates while retained",
+        "All destinations absent and later reopened",
+        "Counter events and state continue after moves",
+        "No CSS element wrapper changes footer:last-child",
+        "Exactly one native child onDestroy on application unmount",
+        "No page, console or hydration recovery errors"
+      ],
+      "qualification": "Actual generated JS bridge against exact minimum compiler/runtime; not the complete converter/catalog suite at that minimum."
+    },
+    "nativeRuntimeSourceComparison": {
+      "minimum": "5.57.1",
+      "installed": "5.57.2",
+      "files": {
+        "src/internal/client/dom/blocks/branches.js": {
+          "minimum": "01d3b5e6144a2f94456e09a794c16b53cf40d658cfbac1392fdeceb927dbf44c",
+          "installed": "01d3b5e6144a2f94456e09a794c16b53cf40d658cfbac1392fdeceb927dbf44c",
+          "identical": true
+        },
+        "src/internal/client/reactivity/effects.js": {
+          "minimum": "e5fe83a0b7580836ecee8f9cd985ef8de920a711fd1ced77579bc854101d07b6",
+          "installed": "e5fe83a0b7580836ecee8f9cd985ef8de920a711fd1ced77579bc854101d07b6",
+          "identical": true
+        },
+        "src/internal/client/dom/blocks/snippet.js": {
+          "minimum": "cd1e11c8c4309758c9c7101641877810e8a15cdb73103380b46924e4eb813c17",
+          "installed": "cd1e11c8c4309758c9c7101641877810e8a15cdb73103380b46924e4eb813c17",
+          "identical": true
+        },
+        "src/internal/client/dom/template.js": {
+          "minimum": "62f7817de020a41b753107a8dcbd4c112dedeba0a95a7f5a886f1ff0dcf565af",
+          "installed": "62f7817de020a41b753107a8dcbd4c112dedeba0a95a7f5a886f1ff0dcf565af",
+          "identical": true
+        },
+        "src/internal/client/dom/operations.js": {
+          "minimum": "97bb8c09671c5e78b45c37e1a873d9325632a7c9ae1bfe1c5f096c67bb65d210",
+          "installed": "97bb8c09671c5e78b45c37e1a873d9325632a7c9ae1bfe1c5f096c67bb65d210",
+          "identical": true
+        }
+      }
+    },
+    "focusedHistorical": {
+      "passed": 89,
+      "seconds": 22.07,
+      "qualification": "Earlier focused target/converter/installed-type check before final presence and cleanup regression additions. Final repository/browser gates supersede it."
+    },
+    "unitReview": {
+      "method": "One bounded inline unit review",
+      "actionableFindings": 1,
+      "resolvedFindings": 1,
+      "independentOrCrossModelReview": false,
+      "wholeGoalReady": false
+    }
+  },
+  "qualificationLimits": [
+    "Final repository browser/target gated skips and explicitly filtered browser cases are recorded separately. Passing this selected unit is not complete framework language or catalog qualification.",
+    "Native C# source is unchanged. Its test and complete Fluid output checks are regression checks; no native hydration or speed claim follows from them.",
+    "Internal Svelte compiler/runtime helpers are used. Minimum and installed versions are qualified as described, with no new peer range restriction or later-release compatibility claim.",
+    "React/Preact actual framework hydration regressions remain open, along with other conditional/receiving and accepted preset/setup/context/filtering combinations.",
+    "Literal defaults are qualified by the included native-control/select/reset cases. Source-order forwarding/control combinations still require the whole-goal audit.",
+    "No latency, allocation, retained-memory or peak-memory improvement is claimed. Complete real Looma all-target three-engine behavior/hydration and comparable cached Fluid/Node performance/memory qualification remain open.",
+    "Shared smallest-client analysis for both servers, native assets/preparation/identity/rendered-form/hydration, remaining native styles/formatting/validation and final protected release-readiness work remain open.",
+    "No package publication or visibility change."
+  ],
+  "sourceHashes": {
+    "CHANGELOG.md": "611fff6fa0cb7717ccfaed69210814283f3ef05e2a9e57cddcc72d3a66adc97b",
+    "packages/html-next/src/targets/svelte.ts": "a3b06350b6f80bc213c9c76c3b0eff65fe1f443300ed6c94ffdb609632c0288d",
+    "packages/html-next/src/targets/svelte-render.ts": "0d8ce180798415efec648a65b3251973ff53727f15941c13fd4473207a7f993a",
+    "packages/html-next/src/targets/svelte-context.ts": "5e6f18c9bf12d249b9b986b9b700f1493ebedd20c851ab2f15e29294a33087a9",
+    "packages/html-next/src/targets/svelte-plain-source.ts": "8dbb40d4b46180f452fcf3d646e46383f61bd30879f147a7df37ff38284f9bf6",
+    "packages/html-next/src/generate.ts": "b706dc268ef30358ccaa6e9609f3617325a3050bcf65715d27de8e56b2396898",
+    "packages/html-next/src/index.ts": "2ca7636190dadf3b5cc1cb3b7b915765993b3925c5cc3d774c8c8e59ade8f019",
+    "packages/html-next-converter/src/index.ts": "4374ec91b594ab69a0e1bfd227bef149fd75ead6185c93e2c9be4127143c8713",
+    "packages/html-next-converter/tests/svelte-columns-parity.test.ts": "11177f483eead4fa617cfda27c9b405f172014738356d2404edc5aa07e74d8fe",
+    "packages/html-next-converter/tests/svelte-columns-consumer-parity.test.ts": "7c3bb2a2351792e873842f6dcabc749172fa566f3948f0faef773b074d8f8765",
+    "packages/html-next-converter/tests/svelte-select-hydration-parity.test.ts": "0d182519b13e855e53724437ae0d2f3bcc0cc9d365b8ac8a1680760d6dd6680d",
+    "packages/html-next-converter/tests/svelte-converter.test.ts": "50da5224b6739249fe01cbf8c4d50d5d0782bb0c911235ef263724064488778e",
+    "packages/html-next-converter/tests/svelte-installed-types.test.ts": "7b3dea2535b5463012f5d41d6c331c23f138d9a100fbcb2bad6df42fb52a2d8d"
+  },
+  "sourceFreeze": "All implementation, test and changelog content frozen before final repository and browser runs. Only this evidence receipt and private continuity notes are added after those gates.",
+  "recordedAt": "2026-11-07T15:55:24.734652+00:00"
+}

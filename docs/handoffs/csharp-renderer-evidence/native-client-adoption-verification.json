@@ -1,0 +1,257 @@
+{
+  "base": "a77e3a12a13614f648992b68711b364c11fb7a1b",
+  "scope": "Native C# compiler-owned client manifest integration and existing generated-client adoption. The full ship-ready renderer objective remains unfinished.",
+  "sourceHashes": {
+    ".github/workflows/ci.yml": "30afda15cca066607b4551c218cef0e5ee408ca556710e8f98d6d533502f3d9a",
+    "CHANGELOG.md": "c59dea51b132b0209c02fc1ab74afb0f2adac5b729089fca55b677797986666a",
+    "package.json": "cc665f8a8a3e0d32a56e85cca91bdbad87eb7c04b9fcaf0e6f1b25fff6a6401d",
+    "packages/html-next-dotnet/HtmlNext.slnx": "6d6990512eaab40dc5805dbabdd5a82afc73d0029248efb2dbb6d9356de99150",
+    "packages/html-next-dotnet/README.md": "ab0b4e7bb0266933bc31fd2f3b31e7c21396601ddcceacbe4f6eb34188713773",
+    "packages/html-next-dotnet/src/HtmlNext/AcceptedChildLists.cs": "84e30cf932a50b5fd796b9675e9a347da5af3285cf1e16dfe24118ac54ab241a",
+    "packages/html-next-dotnet/src/HtmlNext/ClientPlan.cs": "b5d30f254c3aaf47d05c46b544ca1543aa88d75e0f4bb27b869f8b4c86714cb0",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "3c86f50561f07d5a574d7507ac53800824e050a22c8f7782fc8256c46761d507",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentCall.cs": "939c5c6aaad06ae58a56866652bae252520f6d0925b7ff0a7bbe566ed8d726a7",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentGraph.cs": "d7d826127a38b82c9c9c51d9ac7f5e941cdf06e30a39806023e987fd677d8f60",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "fc24e028a16b33adbdb4a00c9c9c938a4d94bea2ae169e4f1654738b1e0a849d",
+    "packages/html-next-dotnet/src/HtmlNext/HydrationRecords.cs": "6c8da0b93cebe88b766c73b50b9ed2cdc5abf0c1b8fffd9ca8dfd691d2335853",
+    "packages/html-next-dotnet/src/HtmlNext/LocalDeclaration.cs": "f23a49432a4f98c498e29dbeaf6f6dc8eec620f4b496a2ac0f6b943bb95df943",
+    "packages/html-next-dotnet/src/HtmlNext/RootStyle.cs": "7f0e23f5fd769af28e0ee1fcd8c2f03757fd900b84e40bae775a07d04bbcfa86",
+    "packages/html-next-dotnet/src/HtmlNext/ServerAssets.cs": "f39a0728c682d9574b2c7a845f1f05b8da89550f9a1702582aac438321ecbdb9",
+    "packages/html-next-dotnet/tests/HtmlNext.FixtureHost/HtmlNext.FixtureHost.csproj": "84e8f174d8820890dba8dbcbe823448c201b2877be0d9d9fc62014b3959049aa",
+    "packages/html-next-dotnet/tests/HtmlNext.FixtureHost/Program.cs": "15990becef8e89d6612f4e92dc551e79a895dd3407dbe5ff35cbec73780c5beb",
+    "packages/html-next-dotnet/tests/HtmlNext.FixtureHost/packages.lock.json": "da12820ad4064ad279fa8e714ee8db91bfb45e66cf9bd8cf0125201420a6018d",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/ClientAssetTests.cs": "9b3fae13dbf698cbd33c6d1e6a4531d0c6459a2d10e31901c356d1f09b6fd773",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HydrationRecordTests.cs": "7e35d564e75e4f151c03c598909ac9559bb8f3b2d8838e2494720be6744f1033",
+    "packages/html-next-unplugin/src/index.ts": "42963ee9d4a0378ebf8fa9003face0762730911993e53742e54d1a48ab821860",
+    "packages/html-next-unplugin/tests/dotnet-hydration.test.ts": "5e6e7672f9474ed4121c2361b9ae5c4908211193d8b9f944263fa820a00967d4",
+    "packages/html-next-unplugin/tests/unplugin.test.ts": "64f1d0d990c068e35fc84af66d71a2b86e401198b720fb1dedb82f7db28bf5af",
+    "scripts/ci-plan.ts": "b9c7d0b2bf9a5e14e8ca21fc9a90629709048de0ade5876f8e2b2c485855e391",
+    "scripts/test-dotnet-client.ts": "5b55a7e3f725c4368b9c19a9bb8fca68ddda968ef78ce0569dbef97e481064f9",
+    "tests/ci.test.ts": "06325aa1cf2a416237dffff6efa03ba2413f540e3fb3f1c866393bf2b078b00b"
+  },
+  "verification": {
+    "repository": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "approximateSecondsFromLogTimestamps": 410.91,
+      "includes": [
+        "verify:inner",
+        "lint",
+        "typecheck",
+        "generated checks",
+        "runtime-size checks",
+        "builds",
+        "native tests",
+        "Fluid full-output validation",
+        "Node/native client integration",
+        "packed consumers"
+      ],
+      "javascript": {
+        "passed": 2090,
+        "skipped": 5012
+      },
+      "native": {
+        "passed": 862,
+        "skipped": 0
+      },
+      "nativeClientIntegration": {
+        "passed": 6,
+        "browserGatedSkips": 3
+      },
+      "packedConsumers": {
+        "passed": 8
+      }
+    },
+    "browser": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH HTMLNEXT_BROWSER_TEST=1 HTMLNEXT_FIREFOX_ENDPOINT=<owned Linux endpoint> node scripts/test-dotnet-client.ts",
+      "exitCode": 0,
+      "passed": 9,
+      "skipped": 0,
+      "seconds": 9.95,
+      "file": "packages/html-next-unplugin/tests/dotnet-hydration.test.ts",
+      "coverage": [
+        "compiler-selected factories and static pruning",
+        "accepted props and explicit null ownership",
+        "one-time state seeds",
+        "early control edits",
+        "root and nested DOM identity",
+        "keyed and fragment rows",
+        "structural aliases and matches",
+        "delegated-root records",
+        "scoped projection and initially carried plain content",
+        "shared data references and independent state copies",
+        "remaining invocation attributes at explicit forwarding owners"
+      ],
+      "engines": [
+        "Chromium on macOS",
+        "Firefox on Linux arm64 Docker, Playwright 1.64.0",
+        "WebKit on macOS"
+      ],
+      "firefoxImage": "mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f",
+      "ownedRunnerAndContainerRemoved": true
+    },
+    "proofFailures": [
+      "New manifest API tests failed compilation before implementation.",
+      "The existing unplugin selected-client test failed because server.hydrate was undefined.",
+      "New interactive record API tests failed compilation before implementation.",
+      "Native structural output caused generated hydration to replace the original root before compatible anchors were emitted.",
+      "The browser decoder recovered distinct prop/input object references before reusing the accepted snapshot in both records.",
+      "Forwarding records omitted unconsumed invocation attributes before explicit attribute owners captured them.",
+      "The lone-surrogate regression failed before preserving its JSON Unicode escape."
+    ],
+    "initialEnvironmentFailure": "The initial verify:inner failed only on two Angular source-package checks because built SDK declarations were absent in the fresh workspace. After pnpm build, both focused checks and the complete final repository gate passed."
+  },
+  "allocations": {
+    "command": "dotnet run --project packages/html-next-dotnet/benchmarks -c Release -- --allocations",
+    "method": "GC.GetAllocatedBytesForCurrentThread, 200 warmed calls. Complete outputs validated before measurement. This is inert rendering allocation attribution, not peak/retained memory or latency evidence.",
+    "samples": [
+      {
+        "name": "card",
+        "repetitions": 200,
+        "nativeTotalBytes": 240,
+        "fluidTotalBytes": 704,
+        "nativeBindingBytes": 64,
+        "nativeWriterBytes": 64,
+        "nativeOutputBufferAndStringBytes": 176,
+        "fluidWriterBytes": 464,
+        "fluidOutputBufferAndStringBytes": 240
+      },
+      {
+        "name": "list-10",
+        "repetitions": 200,
+        "nativeTotalBytes": 1984,
+        "fluidTotalBytes": 4648,
+        "nativeBindingBytes": 784,
+        "nativeWriterBytes": 784,
+        "nativeOutputBufferAndStringBytes": 1200,
+        "fluidWriterBytes": 3384,
+        "fluidOutputBufferAndStringBytes": 1264
+      },
+      {
+        "name": "list-100",
+        "repetitions": 200,
+        "nativeTotalBytes": 19264,
+        "fluidTotalBytes": 37770.52,
+        "nativeBindingBytes": 7264,
+        "nativeWriterBytes": 7264,
+        "nativeOutputBufferAndStringBytes": 12000,
+        "fluidWriterBytes": 25706.52,
+        "fluidOutputBufferAndStringBytes": 12063.999999999996
+      },
+      {
+        "name": "list-1000",
+        "repetitions": 200,
+        "nativeTotalBytes": 195664,
+        "fluidTotalBytes": 502853.8,
+        "nativeBindingBytes": 72064,
+        "nativeWriterBytes": 72064,
+        "nativeOutputBufferAndStringBytes": 123600,
+        "fluidWriterBytes": 248921.64,
+        "fluidOutputBufferAndStringBytes": 253932.15999999997
+      },
+      {
+        "name": "cart-100",
+        "repetitions": 200,
+        "nativeTotalBytes": 19072,
+        "fluidTotalBytes": 54253.04,
+        "nativeBindingBytes": 10592,
+        "nativeWriterBytes": 10592,
+        "nativeOutputBufferAndStringBytes": 8480,
+        "fluidWriterBytes": 45706.52,
+        "fluidOutputBufferAndStringBytes": 8546.520000000004
+      }
+    ],
+    "validatedWorkloads": [
+      {
+        "name": "card",
+        "rows": 0,
+        "bytes": 75,
+        "compileOnceNs": 125740100,
+        "liquidParseOnceNs": 58621000,
+        "outputSha256": "35bde7a7db4efb9760819b971219e35b6fa276b9d8a9e784173184d788b68f6d",
+        "templateSha256": "d63428c5c873f732f089d7d262292c7784989ed531ef3766434fa368c76667fa",
+        "liquidSha256": "7c7ef7d35a1fc737293d91f3c4776ef9f1a10483bf62cd5e2cb16f4540a1c828",
+        "modelSha256": "645c51dbbe297f595345a0eab02a906e108c0b18609081ee200560d4f5ef1fcc",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "da5e70a0ab227e0da2077962706c59a4b56634d7b0b44eacd5b9f79d3b704fd0"
+      },
+      {
+        "name": "list-10",
+        "rows": 10,
+        "bytes": 589,
+        "compileOnceNs": 6032100,
+        "liquidParseOnceNs": 3586400,
+        "outputSha256": "fb48b479b07b9993530dded2dac571fff7999f41a34dfc7a3a4b769e930797bb",
+        "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+        "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+        "modelSha256": "97614a4243bfaebe2d05be8dab8df1f1a99251d249f22ae11aac821107a5a0b8",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "da5e70a0ab227e0da2077962706c59a4b56634d7b0b44eacd5b9f79d3b704fd0"
+      },
+      {
+        "name": "list-100",
+        "rows": 100,
+        "bytes": 5989,
+        "compileOnceNs": 405500,
+        "liquidParseOnceNs": 845500,
+        "outputSha256": "4c56e0194b5004fc2d16775df5d2e417686b9d7122df620c3ee85ee236585240",
+        "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+        "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+        "modelSha256": "e39a426097cace6a6bf2190e8a73466b2718df29aafe2f9d4b586ea152ed1a4f",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "da5e70a0ab227e0da2077962706c59a4b56634d7b0b44eacd5b9f79d3b704fd0"
+      },
+      {
+        "name": "list-1000",
+        "rows": 1000,
+        "bytes": 61789,
+        "compileOnceNs": 550200,
+        "liquidParseOnceNs": 957500,
+        "outputSha256": "9202f2e82e1d681907bb5a417734231b27968c5b33545cb0a08f747b9dfe25ce",
+        "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+        "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+        "modelSha256": "7ced73a5e2bb2cd17aa428c7641c5a8ab445be27518662fc54d66f52fdd5f575",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "da5e70a0ab227e0da2077962706c59a4b56634d7b0b44eacd5b9f79d3b704fd0"
+      },
+      {
+        "name": "cart-100",
+        "rows": 100,
+        "bytes": 4227,
+        "compileOnceNs": 2121100,
+        "liquidParseOnceNs": 2896200,
+        "outputSha256": "6d004995ac4037a19b7b278d391c61e2ebcef79e46891f20dd0b039714be8a3a",
+        "templateSha256": "24b05b970398860feb5672962d5d0827a9137b014f8eb897358a92675213eefc",
+        "liquidSha256": "5df60c1649be6207fd19a022cb09b5ce6d997efef33c1bb01b80e4790a12d15c",
+        "modelSha256": "c9068fce323131357b750a78337bb83945f730c5df931afabecbe4b8f72c104d",
+        "fluidVersion": "2.41.1.0",
+        "angleSharpVersion": "1.9.1.0",
+        "nativeAssemblySha256": "da5e70a0ab227e0da2077962706c59a4b56634d7b0b44eacd5b9f79d3b704fd0"
+      }
+    ],
+    "baseline": "packages/html-next-dotnet/benchmarks/results/2026-11-05-low-memory.json",
+    "fourOriginalNativeAllocationTotalsUnchanged": true
+  },
+  "review": {
+    "completed": true,
+    "mode": "one bounded inline native correctness review; user single-agent directive overrides CE size-based reviewer dispatch",
+    "actionableFindings": 1,
+    "appliedFindings": 1,
+    "finding": "Preserve lone UTF-16 code units instead of Utf8JsonWriter replacement. Focused regression failed first; all native tests passed after the fix.",
+    "independentReviewers": 0,
+    "crossModelReview": false,
+    "simplification": "Reused one immutable prop metadata array during compilation; proof tests preserved."
+  },
+  "limitations": [
+    "Native application/module preparation and prepared-read transfer remain incomplete.",
+    "Accepted-child hydration and complete native language coverage remain incomplete.",
+    "No complete refreshed Looma or MarkupKit qualification follows from this increment.",
+    "No latency, throughput, cold/warm serving, retained-memory or peak-memory claim follows from the allocation check.",
+    "Containerized GitHub CI configuration has not run remotely.",
+    "No package release, public visibility change or PR is authorized or performed."
+  ]
+}

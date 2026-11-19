@@ -15,7 +15,7 @@ import { launchParityBrowser } from "../../html-next/tests/pixel-parity.js";
 import { sveltePlugin } from "./helpers/svelte.js";
 
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const nodeModules = fileURLToPath(new URL("../../html-next/node_modules", import.meta.url));
+const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 const run = promisify(execFile);
 const svelteChecker = createRequire(new URL("../../html-next-unplugin/package.json", import.meta.url)).resolve("svelte-check/bin/svelte-check");
 async function check(directory: string, command: string, args: string[], config: object): Promise<void> {

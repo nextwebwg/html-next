@@ -1,0 +1,182 @@
+[
+  {
+    "name": "static-prop",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf label=\"Input\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf label=\"Input\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf label=\"Input\"></x-leaf>"
+  },
+  {
+    "name": "bound-prop",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf from:label=\"$label\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf label=\"Ready\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf label=\"Ready\"></x-leaf>"
+  },
+  {
+    "name": "native-bound-text",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf><b $value=\"$label\"></b></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf><b>Ready</b></x-leaf></template></section></main>",
+    "carrier": "<x-leaf><b>Ready</b></x-leaf>"
+  },
+  {
+    "name": "native-bound-attribute",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf><b from:title=\"$label\">Inner</b></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf><b title=\"Ready\">Inner</b></x-leaf></template></section></main>",
+    "carrier": "<x-leaf><b title=\"Ready\">Inner</b></x-leaf>"
+  },
+  {
+    "name": "conditional",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf><b $if=\"false\">Hidden</b></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf></x-leaf>"
+  },
+  {
+    "name": "loop",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf><b $each=\"row of [1, 2]\">{$row}</b></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf><b>1</b><b>2</b></x-leaf></template></section></main>",
+    "carrier": "<x-leaf><b>1</b><b>2</b></x-leaf>"
+  },
+  {
+    "name": "fragment",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf><template><b $ref=\"inner\">Inner</b></template></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf><b>Inner</b></x-leaf></template></section></main>",
+    "carrier": "<x-leaf><b>Inner</b></x-leaf>"
+  },
+  {
+    "name": "lazy",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf><template slot=\"lazy\"><b $value=\"$label\" $ref=\"inner\"></b></template></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf><template slot=\"lazy\"><b $value=\"$label\" $ref=\"inner\"></b></template></x-leaf></template></section></main>",
+    "carrier": "<x-leaf><template slot=\"lazy\"><b $value=\"$label\" $ref=\"inner\"></b></template></x-leaf>"
+  },
+  {
+    "name": "forwarding",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf><b><slot>Fallback</slot></b></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf><b><?start slot=\"\" fallback=\"\"?>Fallback<?end?></b></x-leaf></template></section></main>",
+    "carrier": "<x-leaf><b>Fallback</b></x-leaf>"
+  },
+  {
+    "name": "nested-component",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" default=\"Default\">Label.</prop></defs><p><slot></slot></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Ready\"></state></defs><main><x-unused><x-leaf><x-leaf label=\"Inner\"></x-leaf></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf><x-leaf label=\"Inner\"></x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf><x-leaf label=\"Inner\"></x-leaf></x-leaf>"
+  },
+  {
+    "name": "null-input",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"string\" default=\"Default\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs></defs><main><x-unused><x-leaf from:value=\"null\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf></x-leaf>"
+  },
+  {
+    "name": "absent-input",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"string\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state></defs><main><x-unused><x-leaf from:value=\"$record.absent\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf></x-leaf>"
+  },
+  {
+    "name": "invalid-numeric-input",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"number\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs></defs><main><x-unused><x-leaf from:value=\"1 / 0\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf></x-leaf>"
+  },
+  {
+    "name": "wrong-unknown-input",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"number\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"value\" type=\"unknown\" value=\"'bad'\"></state></defs><main><x-unused><x-leaf from:value=\"$value\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf></x-leaf>"
+  },
+  {
+    "name": "valid-unknown-input",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"number\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"value\" type=\"unknown\" from=\"3\"></state></defs><main><x-unused><x-leaf from:value=\"$value\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"3\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"3\"></x-leaf>"
+  },
+  {
+    "name": "list-input",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"list(string)\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"value\" type=\"list(string)\" value=\"['A', 'B']\"></state></defs><main><x-unused><x-leaf from:value=\"$value\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"A B\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"A B\"></x-leaf>"
+  },
+  {
+    "name": "object-input",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"object({ name: string })\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"value\" type=\"object({ name: string })\" value=\"{ name: 'A' }\"></state></defs><main><x-unused><x-leaf from:value=\"$value\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf></x-leaf>"
+  },
+  {
+    "name": "boolean-false",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"boolean\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs></defs><main><x-unused><x-leaf from:value=\"false\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf></x-leaf>"
+  },
+  {
+    "name": "boolean-true",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"boolean\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs></defs><main><x-unused><x-leaf from:value=\"true\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"\"></x-leaf>"
+  },
+  {
+    "name": "written-spelling",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"number\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs></defs><main><x-unused><x-leaf value=\"03\" from:value=\"1 / 0\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"03\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"03\"></x-leaf>"
+  },
+  {
+    "name": "pending-state",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"$waiting\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"7\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"7\"></x-leaf>"
+  },
+  {
+    "name": "pending-computed",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"$derived\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"7\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"7\"></x-leaf>"
+  },
+  {
+    "name": "pending-fallback",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"default($waiting, 9)\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"9\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"9\"></x-leaf>"
+  },
+  {
+    "name": "pending-unread-branch",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"true ? 9 : $waiting\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"9\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"9\"></x-leaf>"
+  },
+  {
+    "name": "available-missing-field",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"$record.missing\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf></x-leaf>"
+  },
+  {
+    "name": "pending-name-shadowed-by-alias",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><template $with=\"3 as waiting\"><x-leaf value=\"7\" from:value=\"$waiting\"></x-leaf></template></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"3\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"3\"></x-leaf>"
+  },
+  {
+    "name": "pending-binding-followed-by-ready-binding",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop><prop name=\"other\" type=\"integer\">Other.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"waiting\" type=\"unknown\" from=\"$record.missing\"></state><computed name=\"derived\" from=\"$waiting\"></computed></defs><main><x-unused><x-leaf value=\"7\" from:value=\"$waiting\" from:other=\"9\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"7\" other=\"9\"></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"7\" other=\"9\"></x-leaf>"
+  },
+  {
+    "name": "typed-row-props",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\">Value.</prop></defs><p></p></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><defs><state name=\"rows\" type=\"list(object({ value: integer }))\" from=\"[{ value: 1.5 }, { value: 3 }, 4]\"></state></defs><main><x-unused><x-leaf $each=\"row of $rows\" value=\"7\" from:value=\"$row.value\"></x-leaf></x-unused></main></template>",
+    "native": "<main><section><template carrier=\"x-unused\"><x-leaf value=\"7\"></x-leaf><x-leaf value=\"3\"></x-leaf><x-leaf></x-leaf></template></section></main>",
+    "carrier": "<x-leaf value=\"7\"></x-leaf><x-leaf value=\"3\"></x-leaf><x-leaf></x-leaf>"
+  },
+  {
+    "name": "forwarded-deferred-before-literal",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" required>Label.</prop></defs><button $attributes></button></template><template component=\"x-unused\"><aside></aside></template><template noforward component=\"x-subject\"><section><x-unused><x-leaf $attributes title=\"Template\"></x-leaf></x-unused></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "native": "<main><section><aside><template carrier=\"x-unused\"><x-leaf title=\"Template\"></x-leaf></template></aside></section></main>",
+    "carrier": "<x-leaf title=\"Template\"></x-leaf>"
+  },
+  {
+    "name": "forwarded-deferred-after-literal",
+    "source": "<template component=\"x-leaf\" module=\"./never-executed.js\"><defs><prop name=\"label\" type=\"string\" required>Label.</prop></defs><button $attributes></button></template><template component=\"x-unused\"><aside></aside></template><template noforward component=\"x-subject\"><section><x-unused><x-leaf title=\"Template\" $attributes></x-leaf></x-unused></section></template><template component=\"x-page\"><main><x-subject title=\"Caller\"></x-subject></main></template>",
+    "native": "<main><section><aside><template carrier=\"x-unused\"><x-leaf title=\"Caller\"></x-leaf></template></aside></section></main>",
+    "carrier": "<x-leaf title=\"Caller\"></x-leaf>"
+  }
+]

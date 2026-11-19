@@ -172,7 +172,8 @@ describe.skipIf(process.env.HTMLNEXT_BROWSER_TEST !== '1')('Node output continue
           });
           for (const page of [hydrated, fresh]) {
             await page.addScriptTag({ content: delivery === 'live' ? liveBundle : staticBundle });
-            await page.waitForFunction(() => document.querySelector('#subject div')?.textContent === 'Result 1');
+            // The controller's effect writes `derived` once it connects, which can follow the read's result.
+            await page.waitForFunction(() => document.querySelector('#subject div')?.textContent === 'Result 1' && document.querySelector('#subject b')?.textContent === '6');
           }
           const before = await inspect(hydrated);
           const freshBefore = await inspect(fresh);

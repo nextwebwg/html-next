@@ -61,6 +61,9 @@ out of Git.
 
 All HTML Next entries use the authored `benchmark-app.html` and `controller.js` from the fork's
 `frameworks/keyed/html-next` entry, and are real directories under the checkout's `frameworks/keyed/`.
+The build removes the obsolete `nullable` attribute from the selected-row declaration.
+Declarations without an initializer already start at null. This syntax migration preserves
+the example's data, controller and workloads; the pinned framework controls are unchanged.
 
 - `html-next-vite-candidate`: a Vite app laid out like the fork's Vue entry. Its `index.html` links
   `/css/currentStyle.css` and loads `main.js`, which imports `createBenchmarkApp` from

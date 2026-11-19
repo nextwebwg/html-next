@@ -699,7 +699,7 @@ export interface BindingPreparation {
 }
 
 /**
- * An ordinary named-connect adapter. HTMLKit may generate this wrapper around a source module;
+ * An ordinary named-connect adapter. An application host may generate this wrapper around a source module;
  * standalone authors may export its connect themselves. Preparation never calls browser behavior.
  */
 export function bindModule<H extends BindingHost>(module: BindingModule<H>, options: BoundModuleOptions<H> = {}): {

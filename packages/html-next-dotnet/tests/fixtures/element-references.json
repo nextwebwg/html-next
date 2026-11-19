@@ -1,0 +1,224 @@
+{
+  "valid": [
+    {
+      "name": "root",
+      "source": "<template component=\"x-page\"><div $ref=\"root\">Ready</div></template>",
+      "expected": "<div>Ready</div>",
+      "native": "<div>Ready</div>",
+      "inertRefs": []
+    },
+    {
+      "name": "child",
+      "source": "<template component=\"x-page\"><main><input $ref=\"field\" value=\"A\"></main></template>",
+      "expected": "<main><input value=\"A\"></main>",
+      "native": "<main><input value=\"A\"></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "repeated",
+      "source": "<template component=\"x-page\"><ul><li $each=\"row of [1, 2]\" $ref=\"rows\">{$row}</li></ul></template>",
+      "expected": "<ul><li>1</li><li>2</li></ul>",
+      "native": "<ul><li>1</li><li>2</li></ul>",
+      "inertRefs": []
+    },
+    {
+      "name": "filtered",
+      "source": "<template component=\"x-page\"><ul><li $each=\"row of [1, 2]\" $where=\"$row > 1\" $ref=\"rows\">{$row}</li></ul></template>",
+      "expected": "<ul><li>2</li></ul>",
+      "native": "<ul><li>2</li></ul>",
+      "inertRefs": []
+    },
+    {
+      "name": "hidden",
+      "source": "<template component=\"x-page\"><main><i $if=\"false\" $ref=\"hidden\">Hidden</i></main></template>",
+      "expected": "<main></main>",
+      "native": "<main></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "root-match",
+      "source": "<template component=\"x-page\"><template $match><div $when=\"true\" $ref=\"root\">A</div><p $else $ref=\"root\">B</p></template></template>",
+      "expected": "<div>A</div>",
+      "native": "<div>A</div>",
+      "inertRefs": []
+    },
+    {
+      "name": "root-match-descendants",
+      "source": "<template component=\"x-page\"><template $match><div $when=\"false\"><b $ref=\"label\">A</b></div><section $else><i $ref=\"label\">B</i></section></template></template>",
+      "expected": "<section><i>B</i></section>",
+      "native": "<section><i>B</i></section>",
+      "inertRefs": []
+    },
+    {
+      "name": "hyphenated-name",
+      "source": "<template component=\"x-page\"><main><b $ref=\"a-handle\">Ready</b></main></template>",
+      "expected": "<main><b>Ready</b></main>",
+      "native": "<main><b>Ready</b></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "case-sensitive-names",
+      "source": "<template component=\"x-page\"><main $ref=\"Name\"><b $ref=\"name\">Ready</b></main></template>",
+      "expected": "<main><b>Ready</b></main>",
+      "native": "<main><b>Ready</b></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "dollar-underscore-name",
+      "source": "<template component=\"x-page\"><main $ref=\"$handle_2\"><b $ref=\"__proto__\">Ready</b></main></template>",
+      "expected": "<main><b>Ready</b></main>",
+      "native": "<main><b>Ready</b></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "definition-owned-names",
+      "source": "<template component=\"x-child\"><b $ref=\"field\">Child</b></template><template component=\"x-page\"><main $ref=\"field\"><x-child></x-child></main></template>",
+      "expected": "<main><b>Child</b></main>",
+      "native": "<main><b>Child</b></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "component-invocation",
+      "source": "<template component=\"x-child\"><b $ref=\"field\">Child</b></template><template component=\"x-page\"><main><x-child $ref=\"field\"></x-child></main></template>",
+      "expected": "<main><b>Child</b></main>",
+      "native": "<main><b>Child</b></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "delegated-root",
+      "source": "<template component=\"x-child\"><b $ref=\"field\">Child</b></template><template component=\"x-page\"><x-child $ref=\"field\"></x-child></template>",
+      "expected": "<b>Child</b>",
+      "native": "<b>Child</b>",
+      "inertRefs": []
+    },
+    {
+      "name": "wrapper",
+      "source": "<template component=\"x-page\"><main><template $ref=\"group\"><b>Group</b></template></main></template>",
+      "expected": "<main><b>Group</b></main>",
+      "native": "<main><b>Group</b></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "svg",
+      "source": "<template component=\"x-page\"><main><svg><path $ref=\"shape\" d=\"M0 0\"></path></svg></main></template>",
+      "expected": "<main><svg><path d=\"M0 0\"></path></svg></main>",
+      "native": "<main><svg><path d=\"M0 0\"></path></svg></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "lazy-body",
+      "source": "<template component=\"x-child\"><section><slot></slot></section></template><template component=\"x-page\"><main><x-child><template slot=\"\"><b $ref=\"body\">Lazy</b></template></x-child></main></template>",
+      "expected": "<main><section><b>Lazy</b></section></main>",
+      "native": "<main><section><?start slot=\"\" scoped=\"\"?><b>Lazy</b><?end?><template carrier=\"x-child\"><template slot=\"\"><b $ref=\"body\">Lazy</b></template></template></section></main>",
+      "inertRefs": [
+        "body"
+      ]
+    },
+    {
+      "name": "unused-lazy-body",
+      "source": "<template component=\"x-child\"><section></section></template><template component=\"x-page\"><main><x-child><template slot=\"\"><b $ref=\"body\">Lazy</b></template></x-child></main></template>",
+      "expected": "<main><section></section></main>",
+      "native": "<main><section><template carrier=\"x-child\"><template slot=\"\"><b $ref=\"body\">Lazy</b></template></template></section></main>",
+      "inertRefs": [
+        "body"
+      ]
+    },
+    {
+      "name": "unplaced-component",
+      "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><main><x-unused><x-leaf $ref=\"leaf\"></x-leaf></x-unused></main></template>",
+      "expected": "<main><section></section></main>",
+      "native": "<main><section><template carrier=\"x-unused\"><x-leaf></x-leaf></template></section></main>",
+      "inertRefs": []
+    },
+    {
+      "name": "lazy-carrier-reference",
+      "source": "<template component=\"x-child\"><section><slot></slot></section></template><template component=\"x-page\"><main><x-child><template slot=\"\" $ref=\"carrier\"><b $ref=\"body\">Lazy</b></template></x-child></main></template>",
+      "expected": "<main><section><b>Lazy</b></section></main>",
+      "native": "<main><section><?start slot=\"\" scoped=\"\"?><b>Lazy</b><?end?><template carrier=\"x-child\"><template slot=\"\"><b $ref=\"body\">Lazy</b></template></template></section></main>",
+      "inertRefs": [
+        "body"
+      ]
+    },
+    {
+      "name": "unplaced-nested-references",
+      "source": "<template component=\"x-leaf\"><b>Leaf</b></template><template component=\"x-unused\"><section></section></template><template component=\"x-page\"><main><x-unused><x-leaf $ref=\"leaf\"><b $ref=\"inner\">Inner</b><template slot=\"details\" $ref=\"carrier\"><i $ref=\"deep\">Deep</i></template></x-leaf></x-unused></main></template>",
+      "expected": "<main><section></section></main>",
+      "native": "<main><section><template carrier=\"x-unused\"><x-leaf><b>Inner</b><template slot=\"details\"><i $ref=\"deep\">Deep</i></template></x-leaf></template></section></main>",
+      "inertRefs": [
+        "deep"
+      ]
+    }
+  ],
+  "invalid": [
+    {
+      "name": "duplicate",
+      "source": "<template component=\"x-page\"><main><b $ref=\"same\"></b><i $ref=\"same\"></i></main></template>",
+      "reason": "duplicat|more than once"
+    },
+    {
+      "name": "hidden-duplicate",
+      "source": "<template component=\"x-page\"><main><b $if=\"false\" $ref=\"same\"></b><i $ref=\"same\"></i></main></template>",
+      "reason": "duplicat|more than once"
+    },
+    {
+      "name": "descendant-duplicate",
+      "source": "<template component=\"x-page\"><main $ref=\"same\"><b $ref=\"same\"></b></main></template>",
+      "reason": "duplicat|more than once"
+    },
+    {
+      "name": "iterated-duplicate",
+      "source": "<template component=\"x-page\"><main><b $each=\"row of [1, 2]\" $ref=\"same\"></b><i $ref=\"same\"></i></main></template>",
+      "reason": "duplicat|more than once"
+    },
+    {
+      "name": "nested-match-duplicate",
+      "source": "<template component=\"x-page\"><main><template $match><b $when=\"true\" $ref=\"same\"></b><i $else $ref=\"same\"></i></template></main></template>",
+      "reason": "duplicat|more than once"
+    },
+    {
+      "name": "unused-duplicate",
+      "source": "<template component=\"x-page\"><main><x-child><template slot=\"a\"><b $ref=\"same\"></b></template><template slot=\"b\"><i $ref=\"same\"></i></template></x-child></main></template>",
+      "reason": "duplicat|more than once"
+    },
+    {
+      "name": "empty",
+      "source": "<template component=\"x-page\"><main><b $ref=\"\"></b></main></template>",
+      "reason": "name"
+    },
+    {
+      "name": "leading-number",
+      "source": "<template component=\"x-page\"><main><b $ref=\"2bad\"></b></main></template>",
+      "reason": "name"
+    },
+    {
+      "name": "whitespace",
+      "source": "<template component=\"x-page\"><main><b $ref=\"two names\"></b></main></template>",
+      "reason": "name"
+    },
+    {
+      "name": "dotted-name",
+      "source": "<template component=\"x-page\"><main><b $ref=\"some.field\"></b></main></template>",
+      "reason": "name"
+    },
+    {
+      "name": "non-ascii",
+      "source": "<template component=\"x-page\"><main><b $ref=\"\ud83d\ude00\"></b></main></template>",
+      "reason": "name"
+    },
+    {
+      "name": "overwritten-duplicate",
+      "source": "<template component=\"x-page\"><main $ref=\"same\" $value=\"'Text'\"><b $ref=\"same\"></b></main></template>",
+      "reason": "duplicat|more than once"
+    },
+    {
+      "name": "trailing-line-feed",
+      "source": "<template component=\"x-page\"><main><b $ref=\"field\n\"></b></main></template>",
+      "reason": "name"
+    },
+    {
+      "name": "trailing-line-separator",
+      "source": "<template component=\"x-page\"><main><b $ref=\"field\u2028\"></b></main></template>",
+      "reason": "name"
+    }
+  ]
+}

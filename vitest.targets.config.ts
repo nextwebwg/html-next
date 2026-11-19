@@ -45,6 +45,7 @@ const config = mergeConfig(baseConfig, {
 
 // mergeConfig concatenates arrays, so do not retain the base Node-test include list.
 config.test!.include = [
+  "packages/html-next-converter/tests/checked-reference-parity.test.ts",
   "packages/html-next/tests/vue-binding-preparation.test.ts",
   "packages/html-next/tests/targets.test.ts",
   "packages/html-next/tests/target-runtime.test.ts",
@@ -62,6 +63,9 @@ config.test!.include = [
   "packages/html-next-converter/tests/slotted-style-parity.test.ts",
   "packages/html-next-converter/tests/consumer-projected-style-parity.test.ts",
   "packages/html-next-converter/tests/null-writes-parity.test.ts",
+  "packages/html-next-converter/tests/class-binding-order-parity.test.ts",
+  "packages/html-next-converter/tests/attribute-forwarding-parity.test.ts",
+  "packages/html-next-converter/tests/unicode-props-parity.test.ts",
   "packages/html-next-converter/tests/prop-input-parity.test.ts",
   "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts",
   "packages/html-next-converter/tests/controller-root-cleanup-parity.test.ts",

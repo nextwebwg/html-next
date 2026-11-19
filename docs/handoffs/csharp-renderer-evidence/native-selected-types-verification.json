@@ -1,0 +1,203 @@
+{
+  "base": "ad9a068fbd8eb3aaf2afcab055dcb0a0c239224d",
+  "scope": "Native conditional prop type binding, shared null-selector acceptance, and interpreted current-value dimension lookup. Incremental work on the unfinished C# renderer objective.",
+  "sourceHashes": {
+    "CHANGELOG.md": "3eea041f8ab7950dc1d9c8d1afcb20e46dcf913541ff31ffa5f7933c860b622d",
+    "packages/html-next-dotnet/README.md": "494d2aecdc85fe33fd37bfe91a9b281eb27ec94c6e6d85a8fc8392ed213c31c8",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "34f42ae6d13fefa2a9fb7c5042bef1b96dffe41c4767a250a2eaf2668b8b7cb6",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentCall.cs": "745544efbe2d877763cf4bca6158bcd5347fff58675cc5495782d0f0d2ed1fcb",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "75a3b822bfd8f5c86643f5332753309a8b186ffd1a28543030d66459971e76a2",
+    "packages/html-next-dotnet/src/HtmlNext/SelectedTypes.cs": "8ab27a9646ffe1cf3feb5a1d26c3ca2a09ebcc8ff53f862bc755b0b12a3b1110",
+    "packages/html-next-dotnet/tests/HtmlNext.FixtureHost/Program.cs": "85641441a15fc920e9928f52aed0f815d2f0a645c8a6fd6213ac20a52a2a6829",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HtmlNext.Tests.csproj": "f2b1cc9c0f0221a14e7713e11bfb919c4f26efbf3e4b365e3f916f65234aab6c",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/SelectedTypeTests.cs": "d015fa0ea732a9d2fdcc52074a7206aa7831f0374f9f145d895fa9d2306d84ba",
+    "packages/html-next-dotnet/tests/fixtures/selected-types.json": "e1bbe613a99d062a9bcee11dc5584f59799d552480b65065fd04823972465517",
+    "packages/html-next-unplugin/tests/dotnet-hydration.test.ts": "7f492a9eaab21d4c5c6b1e4e096f5cf5fc90a258bc0dc22fdcb12b8c1e237d29",
+    "packages/html-next/src/declared-types.ts": "ca73b52927e97672b8f4a0c91c41038638b379f0137a395c20f47180c57c6c8f",
+    "packages/html-next/src/expression.ts": "c31afc60bf124985d8d896656be59d2c1d31efb74c07fa9671481eb18e8e2f34",
+    "packages/html-next/src/generated-runtime.ts": "0ddd767d8b23ea85356636178fbb453cc36c817f8c3e3ab8c0896b3004295171",
+    "packages/html-next/src/prop-values.ts": "0dfea385dfc871227eb6dbdef77ca3694b1e55f6179e69b765328809b78a2420",
+    "packages/html-next/tests/native-selected-types.test.ts": "964db8d11e305764375889109d34f76d35aaf2fe2309928d5ba19a450c0d2721",
+    "packages/html-next/tests/vanilla-blocks.test.ts": "8b6d5eb06bc5d19c10642fffb957c907110c75aa7366f3fd0b04949ba688e032"
+  },
+  "proof": {
+    "native": "Initial 12 shared cases failed at unsupported named/inline type declarations.",
+    "node": "Initial null-selector case accepted a non-null value. Expanded selected-dimension arithmetic case then returned empty text instead of 4px.",
+    "finalFocused": {
+      "sharedNodeNativeCorpus": 19,
+      "nativeSelectionTestsIncludingRejectionAndIsolation": 26,
+      "expressionAndCorpus": 76,
+      "directLiveExpectedOutputRegressions": 2
+    }
+  },
+  "verification": {
+    "repository": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "javascript": {
+        "passed": 2111,
+        "explicitlyGatedSkips": 5012,
+        "seconds": 488.22
+      },
+      "native": {
+        "passed": 888,
+        "skipped": 0
+      },
+      "fluidFullOutputValidations": 5,
+      "nativeClientIntegration": {
+        "passed": 6,
+        "browserGatedSkips": 3
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "seconds": 82.02
+      },
+      "includes": [
+        "verify:inner",
+        "lint",
+        "typecheck",
+        "generated checks",
+        "runtime size checks",
+        "builds",
+        "native tests",
+        "native/client integration",
+        "packed consumers"
+      ]
+    },
+    "browser": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH HTMLNEXT_BROWSER_TEST=1 HTMLNEXT_FIREFOX_ENDPOINT=ws://127.0.0.1:39991/native-hydration node scripts/test-dotnet-client.ts",
+      "exitCode": 0,
+      "passed": 9,
+      "skipped": 0,
+      "seconds": 19.82,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "coverage": "Original roots/controls, early edits, seeds, structure, keyed rows, shared roots, carried slots, number/string selected types and subsequent prop updates.",
+      "firefox": "Linux arm64 Docker, Playwright 1.64.0, mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f. Owned container stopped and removed."
+    },
+    "allocationObserver": {
+      "command": "/Users/matthew/.dotnet/dotnet run --project packages/html-next-dotnet/benchmarks -c Release -- --allocations",
+      "exitCode": 0,
+      "fullOutputsValidated": true,
+      "observations": [
+        {
+          "name": "card",
+          "repetitions": 200,
+          "nativeTotalBytes": 240,
+          "nativeBindingBytes": 64,
+          "nativeWriterBytes": 64
+        },
+        {
+          "name": "list-10",
+          "repetitions": 200,
+          "nativeTotalBytes": 1984,
+          "nativeBindingBytes": 784,
+          "nativeWriterBytes": 784
+        },
+        {
+          "name": "list-100",
+          "repetitions": 200,
+          "nativeTotalBytes": 19264,
+          "nativeBindingBytes": 7264,
+          "nativeWriterBytes": 7264
+        },
+        {
+          "name": "list-1000",
+          "repetitions": 200,
+          "nativeTotalBytes": 195664,
+          "nativeBindingBytes": 72064,
+          "nativeWriterBytes": 72064
+        },
+        {
+          "name": "cart-100",
+          "repetitions": 200,
+          "nativeTotalBytes": 19072,
+          "nativeBindingBytes": 10592,
+          "nativeWriterBytes": 10592
+        }
+      ],
+      "comparison": "All five native totals unchanged from the preceding checkpoint observer. No selected-type latency, retained-memory or peak-memory claim."
+    }
+  },
+  "catalog": {
+    "loomaCommit": "714d557c0e042a16a274f107f77dcccd67070b69",
+    "entries": 106,
+    "passed": 79,
+    "failed": 27,
+    "scope": "Native graph compilation only, using the compiler-owned hydrate asset manifest; no rendering or behavior claim.",
+    "firstFailures": {
+      "Expected number or integer, got string. In expression '$disabled or ($mode = 'days' and $model.previousMonth = '') or ($mode = 'months' and $model.month < '0002-01') or ($mode = 'years' and $model.yearPageStart = 1)' at 110.": [
+        "ui-calendar",
+        "ui-date-picker",
+        "ui-date-range-picker"
+      ],
+      "'style:--_grid-column-cap' is not implemented in the measured rendering slice.": [
+        "ui-card-group",
+        "ui-grid"
+      ],
+      "'style:--_max-rows' is not implemented in the measured rendering slice.": [
+        "ui-combobox",
+        "ui-editor-code-language"
+      ],
+      "'default-true-reason' is not implemented in the measured rendering slice.": [
+        "ui-compact-editor",
+        "ui-editor",
+        "ui-skeleton"
+      ],
+      "'style:--_ui-stack-height' is not implemented in the measured rendering slice.": [
+        "ui-editor-chip-editor",
+        "ui-editor-image-toolbar",
+        "ui-editor-link-card",
+        "ui-editor-link-form",
+        "ui-stack"
+      ],
+      "'style:--_rows' is not implemented in the measured rendering slice.": [
+        "ui-editor-footnote-editor",
+        "ui-editor-insert-table-grid",
+        "ui-listbox",
+        "ui-textarea"
+      ],
+      "'style:--_swatch' is not implemented in the measured rendering slice.": [
+        "ui-editor-table-context-menu",
+        "ui-editor-table-toolbar"
+      ],
+      "'style:top' is not implemented in the measured rendering slice.": [
+        "ui-editor-table-overlay"
+      ],
+      "Unknown function or invalid argument count for 'format'. In expression 'format($file.size, 'unit', { unit: 'byte', unitDisplay: 'short', maximumFractionDigits: 0 }, $locale)' at 101.": [
+        "ui-file-input"
+      ],
+      "Unknown function or invalid argument count for 'format'. In expression '{ true: null, false: { true: $valueText, false: format($percent / 100, 'percent', { maximumFractionDigits: 0 }) }[concat($valueText != '')] }[concat($variant = 'distribution')]' at 113.": [
+        "ui-meter"
+      ],
+      "Unknown function or invalid argument count for 'format'. In expression 'format($item.value, 'number')' at 29.": [
+        "ui-pagination"
+      ],
+      "'select' is not implemented in the measured rendering slice.": [
+        "ui-select"
+      ],
+      "Unknown function or invalid argument count for 'format'. In expression 'format($hour * 3600000, 'time', $hourFormat, $locale)' at 53.": [
+        "ui-time-picker"
+      ]
+    }
+  },
+  "review": {
+    "mode": "One bounded inline correctness and simplification pass under the user single-agent instruction. No independent or cross-model reviewers.",
+    "result": "No retained actionable findings in the bounded increment. Full renderer completion was not assessed as achieved."
+  },
+  "intermediateRuns": [
+    "Development verify:inner failed only the added selected-dimension Node case: 2109 passed, 1 failed, 5012 explicitly gated skips. Fixed without changing its expected output.",
+    "A preliminary verify:pr was cancelled after production source changed. Only its verified workspace-owned process tree was terminated. The final command above qualifies the frozen source."
+  ],
+  "remaining": [
+    "Native application preparation and accepted-child hydration remain incomplete.",
+    "Full Looma rendering, behavior and hydration qualification across targets and engines remains incomplete.",
+    "Conditional types still need complete default/reference and generated-framework dimension qualification.",
+    "The catalog compilation audit is not a full catalog rendering or behavior gate. Initial Looma preparation used Node 25 through local shell selection, so it does not establish supported-runtime qualification.",
+    "Whole-objective Fluid/Node cold/warm latency, throughput, retained and peak memory, serving comparisons and release readiness remain unfinished.",
+    "No PR, package publication, public visibility change or branch rename."
+  ]
+}

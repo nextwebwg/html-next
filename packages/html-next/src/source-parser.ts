@@ -1,6 +1,6 @@
-import { parseFragment, type DefaultTreeAdapterTypes } from "parse5";
+import { parseFragment, serialize, type DefaultTreeAdapterTypes } from "parse5";
 
-import { parseComponentNodes } from "./parser.js";
+import { parseComponentNodes, type ComponentSourceNode } from "./parser.js";
 import { getDomInterface, resolveDomProperty } from "./platform.js";
 import { fail, recoverDiagnostic, type HtmlDiagnostic, type DiagnosticLocation } from "./diagnostics.js";
 import { isResourceBuildMetadata } from "./resource-metadata.js";
@@ -34,7 +34,7 @@ function parseSource(sourceText: string): DefaultTreeAdapterTypes.DocumentFragme
   return fragment;
 }
 
-const platform = { isNativeElement: (name: string) => getDomInterface(name) !== undefined, resolveDomProperty };
+const platform = { slotContent: (element: ComponentSourceNode) => serialize(element as DefaultTreeAdapterTypes.Element), isNativeElement: (name: string) => getDomInterface(name) !== undefined, resolveDomProperty };
 
 function nodeLocation(node: DefaultTreeAdapterTypes.ChildNode): DiagnosticLocation | undefined {
   const location = node.sourceCodeLocation;

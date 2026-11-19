@@ -21,13 +21,19 @@ output inventory.
 
 Generated target components must preserve the shared semantic model: native root behavior,
 projected content, properties (as attributes), events, methods, declared type behavior, state results,
-requests, styles, lifecycle, controller behavior, and hydration outcome.
+requests, styles, controller behavior, and hydration outcome.
 
-Acceptance is based on the component's appearance and runtime behavior, including controller
-connect/disconnect calls and cleanup. Each framework may use its own DOM and SSR representation,
-provided its output can hydrate into the equivalent functioning component. Node-object identity
-and identical serialized SSR markup are not independent acceptance criteria. Tests should verify
-the behavior at stake, such as focus, selection, edited control values, event delivery, and cleanup.
+Acceptance is based on **identical user experience**. Exact component lifecycle, setup or effect
+counts, DOM node identity, and framework instance identity are not conversion requirements. Each
+framework owns its normal reconciliation and hydration, including recreation of nodes or components.
+Tests verify visible content and placement, interactions, focus, selection, edited control values,
+validation, accessibility, event delivery, and cleanup. They must not force lifecycle mechanics that
+have no effect on the user. The public [conversion lifecycle contract](https://nextwebwg.org/declarative-components/targets#framework-lifecycle)
+is authoritative.
+
+Use supported framework primitives. Do not patch private ownership trees, copy framework event
+banks, or retain views solely to enforce invisible lifecycle or identity matching. Integration code
+must address a demonstrated difference in user experience.
 
 Target-native conventions may shape private implementation and generated source. They must not add
 wrapper elements, change public names, substitute framework-only event semantics, or make target
@@ -185,8 +191,8 @@ failures use the shared parser and style validator; the browser corpus and publi
 the same codes. Runtime failures for typed props/events, duplicate keys, hydration, computed cycles,
 scoped slots, recursion, missing context, and controller loading/exports have three-engine
 differential fixtures in both graph modes. Graph, controller-resource, collision, and target-version
-errors are checked before output is written. Duplicate live registration (`HR001`) and duplicate
-build-graph tags (`HL007`) both reject the invalid graph. `HB001`, `HR003`, `HL008`, and `HS005`
+errors are checked before output is written. Two live definitions of one tag discovered together
+(`HR001`) and duplicate build-graph tags (`HL007`) both reject the invalid graph. `HB001`, `HR003`, `HL008`, and `HS005`
 guard direct runtime APIs or unreachable post-validation states, not authored Vue features;
 `HV001` reports unreadable cross-origin CSS in the separate HTML Forms validity-style shim.
 The target's `HT030`, `HT031`, `HT033`, and `HT034` guards require a malformed programmatic

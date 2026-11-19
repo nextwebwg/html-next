@@ -3,6 +3,7 @@ title: Prebuild Vue and React
 order: 4
 blurb: optional framework builds · one npm package
 eyebrow: HTML Next · Libraries
+navGroup: converter
 ---
 
 # Add prebuilt Vue and React versions

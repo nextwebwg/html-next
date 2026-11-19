@@ -1,0 +1,2855 @@
+[
+  {
+    "name": "name language en code",
+    "value": "en",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English"
+  },
+  {
+    "name": "name language en none",
+    "value": "en",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English"
+  },
+  {
+    "name": "name language en-US code",
+    "value": "en-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "American English"
+  },
+  {
+    "name": "name language en-US none",
+    "value": "en-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "American English"
+  },
+  {
+    "name": "name language zh-Hant code",
+    "value": "zh-Hant",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Traditional Chinese",
+    "platformExpected": {
+      "macos-icu-78.1": "Chinese, Traditional"
+    }
+  },
+  {
+    "name": "name language zh-Hant none",
+    "value": "zh-Hant",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Traditional Chinese",
+    "platformExpected": {
+      "macos-icu-78.1": "Chinese, Traditional"
+    }
+  },
+  {
+    "name": "name language fr-CA code",
+    "value": "fr-CA",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Canadian French"
+  },
+  {
+    "name": "name language fr-CA none",
+    "value": "fr-CA",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Canadian French"
+  },
+  {
+    "name": "name language iw code",
+    "value": "iw",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Hebrew"
+  },
+  {
+    "name": "name language iw none",
+    "value": "iw",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Hebrew"
+  },
+  {
+    "name": "name language zz code",
+    "value": "zz",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "zz"
+  },
+  {
+    "name": "name language zz none",
+    "value": "zz",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name language ZZ code",
+    "value": "ZZ",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "zz"
+  },
+  {
+    "name": "name language ZZ none",
+    "value": "ZZ",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name language zz-US code",
+    "value": "zz-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "zz (United States)",
+    "platformExpected": {
+      "macos-icu-78.1": "zz (US)"
+    }
+  },
+  {
+    "name": "name language zz-US none",
+    "value": "zz-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name language en-XX code",
+    "value": "en-XX",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (XX)"
+  },
+  {
+    "name": "name language en-XX none",
+    "value": "en-XX",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name language en-Zzzz code",
+    "value": "en-Zzzz",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (Unknown Script)"
+  },
+  {
+    "name": "name language en-Zzzz none",
+    "value": "en-Zzzz",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (Unknown Script)"
+  },
+  {
+    "name": "name language sh code",
+    "value": "sh",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Serbian (Latin)"
+  },
+  {
+    "name": "name language sh none",
+    "value": "sh",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Serbian (Latin)"
+  },
+  {
+    "name": "name language sh-Cyrl code",
+    "value": "sh-Cyrl",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Serbian (Cyrillic)"
+  },
+  {
+    "name": "name language sh-Cyrl none",
+    "value": "sh-Cyrl",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Serbian (Cyrillic)"
+  },
+  {
+    "name": "name language sh-BA code",
+    "value": "sh-BA",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Serbian (Latin, Bosnia & Herzegovina)",
+    "platformExpected": {
+      "macos-icu-78.1": "Serbian (Latin, Bosnia)"
+    }
+  },
+  {
+    "name": "name language sh-BA none",
+    "value": "sh-BA",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Serbian (Latin, Bosnia & Herzegovina)",
+    "platformExpected": {
+      "macos-icu-78.1": "Serbian (Latin, Bosnia)"
+    }
+  },
+  {
+    "name": "name language mo code",
+    "value": "mo",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Romanian"
+  },
+  {
+    "name": "name language mo none",
+    "value": "mo",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Romanian"
+  },
+  {
+    "name": "name language tl code",
+    "value": "tl",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Filipino"
+  },
+  {
+    "name": "name language tl none",
+    "value": "tl",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Filipino"
+  },
+  {
+    "name": "name language aam code",
+    "value": "aam",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "aas"
+  },
+  {
+    "name": "name language aam none",
+    "value": "aam",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name language en-Qaai code",
+    "value": "en-Qaai",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (Inherited)"
+  },
+  {
+    "name": "name language en-Qaai none",
+    "value": "en-Qaai",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (Inherited)"
+  },
+  {
+    "name": "name language en-BU code",
+    "value": "en-BU",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (Myanmar [Burma])",
+    "platformExpected": {
+      "macos-icu-78.1": "English (Myanmar)"
+    }
+  },
+  {
+    "name": "name language en-BU none",
+    "value": "en-BU",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (Myanmar [Burma])",
+    "platformExpected": {
+      "macos-icu-78.1": "English (Myanmar)"
+    }
+  },
+  {
+    "name": "name language und code",
+    "value": "und",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "root",
+    "platformExpected": {
+      "macos-icu-78.1": "Root"
+    }
+  },
+  {
+    "name": "name language und none",
+    "value": "und",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null,
+    "platformExpected": {
+      "macos-icu-78.1": "Root"
+    }
+  },
+  {
+    "name": "name language root code",
+    "value": "root",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name language root none",
+    "value": "root",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name language en-US-u-ca-buddhist code",
+    "value": "en-US-u-ca-buddhist",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name language en-US-u-ca-buddhist none",
+    "value": "en-US-u-ca-buddhist",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name region US code",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "United States"
+  },
+  {
+    "name": "name region US none",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "United States"
+  },
+  {
+    "name": "name region GB code",
+    "value": "GB",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "United Kingdom"
+  },
+  {
+    "name": "name region GB none",
+    "value": "GB",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "United Kingdom"
+  },
+  {
+    "name": "name region 419 code",
+    "value": "419",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Latin America"
+  },
+  {
+    "name": "name region 419 none",
+    "value": "419",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Latin America"
+  },
+  {
+    "name": "name region ZZ code",
+    "value": "ZZ",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Unknown Region"
+  },
+  {
+    "name": "name region ZZ none",
+    "value": "ZZ",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Unknown Region"
+  },
+  {
+    "name": "name region XX code",
+    "value": "XX",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "XX"
+  },
+  {
+    "name": "name region XX none",
+    "value": "XX",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name region us code",
+    "value": "us",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "us"
+  },
+  {
+    "name": "name region us none",
+    "value": "us",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name region invalid code",
+    "value": "invalid",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name region invalid none",
+    "value": "invalid",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name script Latn code",
+    "value": "Latn",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Latin"
+  },
+  {
+    "name": "name script Latn none",
+    "value": "Latn",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Latin"
+  },
+  {
+    "name": "name script Cyrl code",
+    "value": "Cyrl",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Cyrillic"
+  },
+  {
+    "name": "name script Cyrl none",
+    "value": "Cyrl",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Cyrillic"
+  },
+  {
+    "name": "name script Zzzz code",
+    "value": "Zzzz",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Unknown Script"
+  },
+  {
+    "name": "name script Zzzz none",
+    "value": "Zzzz",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Unknown Script"
+  },
+  {
+    "name": "name script Qaaa code",
+    "value": "Qaaa",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Qaaa"
+  },
+  {
+    "name": "name script Qaaa none",
+    "value": "Qaaa",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name script latn code",
+    "value": "latn",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "latn"
+  },
+  {
+    "name": "name script latn none",
+    "value": "latn",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name script invalid code",
+    "value": "invalid",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name script invalid none",
+    "value": "invalid",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "script",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name currency USD code",
+    "value": "USD",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "US Dollar"
+  },
+  {
+    "name": "name currency USD none",
+    "value": "USD",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "US Dollar"
+  },
+  {
+    "name": "name currency eur code",
+    "value": "eur",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Euro"
+  },
+  {
+    "name": "name currency eur none",
+    "value": "eur",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Euro"
+  },
+  {
+    "name": "name currency ZZZ code",
+    "value": "ZZZ",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "ZZZ"
+  },
+  {
+    "name": "name currency ZZZ none",
+    "value": "ZZZ",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name currency XXX code",
+    "value": "XXX",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Unknown Currency"
+  },
+  {
+    "name": "name currency XXX none",
+    "value": "XXX",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Unknown Currency"
+  },
+  {
+    "name": "name currency bad! code",
+    "value": "bad!",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name currency bad! none",
+    "value": "bad!",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "currency",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name calendar gregory code",
+    "value": "gregory",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Gregorian Calendar"
+  },
+  {
+    "name": "name calendar gregory none",
+    "value": "gregory",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Gregorian Calendar"
+  },
+  {
+    "name": "name calendar buddhist code",
+    "value": "buddhist",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Buddhist Calendar"
+  },
+  {
+    "name": "name calendar buddhist none",
+    "value": "buddhist",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Buddhist Calendar"
+  },
+  {
+    "name": "name calendar islamic-civil code",
+    "value": "islamic-civil",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Hijri Calendar (tabular, civil epoch)"
+  },
+  {
+    "name": "name calendar islamic-civil none",
+    "value": "islamic-civil",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "Hijri Calendar (tabular, civil epoch)"
+  },
+  {
+    "name": "name calendar islamicc code",
+    "value": "islamicc",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "islamicc"
+  },
+  {
+    "name": "name calendar islamicc none",
+    "value": "islamicc",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name calendar notreal code",
+    "value": "notreal",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "notreal"
+  },
+  {
+    "name": "name calendar notreal none",
+    "value": "notreal",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "absent",
+    "expected": null
+  },
+  {
+    "name": "name calendar gregorian code",
+    "value": "gregorian",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name calendar gregorian none",
+    "value": "gregorian",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "calendar",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name dateTimeField era code",
+    "value": "era",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "era"
+  },
+  {
+    "name": "name dateTimeField era none",
+    "value": "era",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "era"
+  },
+  {
+    "name": "name dateTimeField year code",
+    "value": "year",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "year"
+  },
+  {
+    "name": "name dateTimeField year none",
+    "value": "year",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "year"
+  },
+  {
+    "name": "name dateTimeField quarter code",
+    "value": "quarter",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "quarter"
+  },
+  {
+    "name": "name dateTimeField quarter none",
+    "value": "quarter",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "quarter"
+  },
+  {
+    "name": "name dateTimeField month code",
+    "value": "month",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "month"
+  },
+  {
+    "name": "name dateTimeField month none",
+    "value": "month",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "month"
+  },
+  {
+    "name": "name dateTimeField weekOfYear code",
+    "value": "weekOfYear",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "week"
+  },
+  {
+    "name": "name dateTimeField weekOfYear none",
+    "value": "weekOfYear",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "week"
+  },
+  {
+    "name": "name dateTimeField weekday code",
+    "value": "weekday",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "day of the week"
+  },
+  {
+    "name": "name dateTimeField weekday none",
+    "value": "weekday",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "day of the week"
+  },
+  {
+    "name": "name dateTimeField day code",
+    "value": "day",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "day"
+  },
+  {
+    "name": "name dateTimeField day none",
+    "value": "day",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "day"
+  },
+  {
+    "name": "name dateTimeField dayPeriod code",
+    "value": "dayPeriod",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "AM/PM"
+  },
+  {
+    "name": "name dateTimeField dayPeriod none",
+    "value": "dayPeriod",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "AM/PM"
+  },
+  {
+    "name": "name dateTimeField hour code",
+    "value": "hour",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "hour"
+  },
+  {
+    "name": "name dateTimeField hour none",
+    "value": "hour",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "hour"
+  },
+  {
+    "name": "name dateTimeField minute code",
+    "value": "minute",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "minute"
+  },
+  {
+    "name": "name dateTimeField minute none",
+    "value": "minute",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "minute"
+  },
+  {
+    "name": "name dateTimeField second code",
+    "value": "second",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "second"
+  },
+  {
+    "name": "name dateTimeField second none",
+    "value": "second",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "second"
+  },
+  {
+    "name": "name dateTimeField timeZoneName code",
+    "value": "timeZoneName",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "time zone"
+  },
+  {
+    "name": "name dateTimeField timeZoneName none",
+    "value": "timeZoneName",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "time zone"
+  },
+  {
+    "name": "name dateTimeField invalid code",
+    "value": "invalid",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "code"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name dateTimeField invalid none",
+    "value": "invalid",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "dateTimeField",
+      "fallback": "none"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "language long dialect",
+    "value": "en-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "style": "long",
+      "languageDisplay": "dialect"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "American English"
+  },
+  {
+    "name": "language long standard",
+    "value": "en-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "style": "long",
+      "languageDisplay": "standard"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (United States)",
+    "platformExpected": {
+      "macos-icu-78.1": "English (US)"
+    }
+  },
+  {
+    "name": "language short dialect",
+    "value": "en-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "style": "short",
+      "languageDisplay": "dialect"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "US English"
+  },
+  {
+    "name": "language short standard",
+    "value": "en-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "style": "short",
+      "languageDisplay": "standard"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (US)"
+  },
+  {
+    "name": "language narrow dialect",
+    "value": "en-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "style": "narrow",
+      "languageDisplay": "dialect"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "US English"
+  },
+  {
+    "name": "language narrow standard",
+    "value": "en-US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "language",
+      "style": "narrow",
+      "languageDisplay": "standard"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "English (US)"
+  },
+  {
+    "name": "name locale de-DE",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region"
+    },
+    "locale": "de-DE",
+    "status": "value",
+    "expected": "Vereinigte Staaten"
+  },
+  {
+    "name": "name locale fr-CA",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region"
+    },
+    "locale": "fr-CA",
+    "status": "value",
+    "expected": "États-Unis"
+  },
+  {
+    "name": "name locale ja-JP",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region"
+    },
+    "locale": "ja-JP",
+    "status": "value",
+    "expected": "アメリカ合衆国"
+  },
+  {
+    "name": "name locale ar-EG",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region"
+    },
+    "locale": "ar-EG",
+    "status": "value",
+    "expected": "الولايات المتحدة"
+  },
+  {
+    "name": "invalid name options {}",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {},
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid name options {\"type\":\"invalid\"}",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "invalid"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid name options {\"type\":\"region\",\"style\":\"invalid\"}",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "style": "invalid"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid name options {\"type\":\"region\",\"fallback\":\"invalid\"}",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "fallback": "invalid"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid name options {\"type\":\"region\",\"languageDisplay\":\"invalid\"}",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "languageDisplay": "invalid"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid name options {\"type\":\"region\",\"localeMatcher\":\"invalid\"}",
+    "value": "US",
+    "inputType": "string",
+    "formatter": "displayName",
+    "options": {
+      "type": "region",
+      "localeMatcher": "invalid"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "name requires a string",
+    "value": 12,
+    "inputType": "number",
+    "formatter": "displayName",
+    "options": {
+      "type": "region"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "plural en-US 0",
+    "value": 0,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 0"
+  },
+  {
+    "name": "plural en-US 1",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "one: 1"
+  },
+  {
+    "name": "plural en-US 2",
+    "value": 2,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 2"
+  },
+  {
+    "name": "plural en-US 3",
+    "value": 3,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 3"
+  },
+  {
+    "name": "plural en-US 5",
+    "value": 5,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 5"
+  },
+  {
+    "name": "plural en-US 11",
+    "value": 11,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 11"
+  },
+  {
+    "name": "plural en-US 21",
+    "value": 21,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 21"
+  },
+  {
+    "name": "plural en-US 1.5",
+    "value": 1.5,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 1.5"
+  },
+  {
+    "name": "plural fr-FR 0",
+    "value": 0,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "fr-FR",
+    "status": "value",
+    "expected": "one: 0"
+  },
+  {
+    "name": "plural fr-FR 1",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "fr-FR",
+    "status": "value",
+    "expected": "one: 1"
+  },
+  {
+    "name": "plural fr-FR 2",
+    "value": 2,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "fr-FR",
+    "status": "value",
+    "expected": "other: 2"
+  },
+  {
+    "name": "plural fr-FR 3",
+    "value": 3,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "fr-FR",
+    "status": "value",
+    "expected": "other: 3"
+  },
+  {
+    "name": "plural fr-FR 5",
+    "value": 5,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "fr-FR",
+    "status": "value",
+    "expected": "other: 5"
+  },
+  {
+    "name": "plural fr-FR 11",
+    "value": 11,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "fr-FR",
+    "status": "value",
+    "expected": "other: 11"
+  },
+  {
+    "name": "plural fr-FR 21",
+    "value": 21,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "fr-FR",
+    "status": "value",
+    "expected": "other: 21"
+  },
+  {
+    "name": "plural fr-FR 1.5",
+    "value": 1.5,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "fr-FR",
+    "status": "value",
+    "expected": "one: 1,5"
+  },
+  {
+    "name": "plural ru-RU 0",
+    "value": 0,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ru-RU",
+    "status": "value",
+    "expected": "many: 0"
+  },
+  {
+    "name": "plural ru-RU 1",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ru-RU",
+    "status": "value",
+    "expected": "one: 1"
+  },
+  {
+    "name": "plural ru-RU 2",
+    "value": 2,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ru-RU",
+    "status": "value",
+    "expected": "few: 2"
+  },
+  {
+    "name": "plural ru-RU 3",
+    "value": 3,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ru-RU",
+    "status": "value",
+    "expected": "few: 3"
+  },
+  {
+    "name": "plural ru-RU 5",
+    "value": 5,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ru-RU",
+    "status": "value",
+    "expected": "many: 5"
+  },
+  {
+    "name": "plural ru-RU 11",
+    "value": 11,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ru-RU",
+    "status": "value",
+    "expected": "many: 11"
+  },
+  {
+    "name": "plural ru-RU 21",
+    "value": 21,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ru-RU",
+    "status": "value",
+    "expected": "one: 21"
+  },
+  {
+    "name": "plural ru-RU 1.5",
+    "value": 1.5,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ru-RU",
+    "status": "value",
+    "expected": "other: 1,5"
+  },
+  {
+    "name": "plural ar-EG 0",
+    "value": 0,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ar-EG",
+    "status": "value",
+    "expected": "zero: ٠"
+  },
+  {
+    "name": "plural ar-EG 1",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ar-EG",
+    "status": "value",
+    "expected": "one: ١"
+  },
+  {
+    "name": "plural ar-EG 2",
+    "value": 2,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ar-EG",
+    "status": "value",
+    "expected": "two: ٢"
+  },
+  {
+    "name": "plural ar-EG 3",
+    "value": 3,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ar-EG",
+    "status": "value",
+    "expected": "few: ٣"
+  },
+  {
+    "name": "plural ar-EG 5",
+    "value": 5,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ar-EG",
+    "status": "value",
+    "expected": "few: ٥"
+  },
+  {
+    "name": "plural ar-EG 11",
+    "value": 11,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ar-EG",
+    "status": "value",
+    "expected": "many: ١١"
+  },
+  {
+    "name": "plural ar-EG 21",
+    "value": 21,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ar-EG",
+    "status": "value",
+    "expected": "many: ٢١"
+  },
+  {
+    "name": "plural ar-EG 1.5",
+    "value": 1.5,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "ar-EG",
+    "status": "value",
+    "expected": "other: ١٫٥"
+  },
+  {
+    "name": "ordinal 1",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "type": "ordinal",
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "one: 1"
+  },
+  {
+    "name": "ordinal 2",
+    "value": 2,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "type": "ordinal",
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "two: 2"
+  },
+  {
+    "name": "ordinal 3",
+    "value": 3,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "type": "ordinal",
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "few: 3"
+  },
+  {
+    "name": "ordinal 4",
+    "value": 4,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "type": "ordinal",
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 4"
+  },
+  {
+    "name": "ordinal 11",
+    "value": 11,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "type": "ordinal",
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 11"
+  },
+  {
+    "name": "ordinal 21",
+    "value": 21,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "type": "ordinal",
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "one: 21"
+  },
+  {
+    "name": "ordinal 22",
+    "value": 22,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "type": "ordinal",
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "two: 22"
+  },
+  {
+    "name": "ordinal 23",
+    "value": 23,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "type": "ordinal",
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "few: 23"
+  },
+  {
+    "name": "plural precision {\"maximumFractionDigits\":0}",
+    "value": 1.004,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "maximumFractionDigits": 0
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "one: 1"
+  },
+  {
+    "name": "plural precision {\"minimumFractionDigits\":1}",
+    "value": 1.004,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "minimumFractionDigits": 1
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 1.004"
+  },
+  {
+    "name": "plural precision {\"maximumSignificantDigits\":1}",
+    "value": 1.004,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "maximumSignificantDigits": 1
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "one: 1"
+  },
+  {
+    "name": "plural precision {\"maximumFractionDigits\":1,\"roundingMode\":\"halfEven\"}",
+    "value": 1.004,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "maximumFractionDigits": 1,
+      "roundingMode": "halfEven"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "one: 1"
+  },
+  {
+    "name": "plural precision {\"minimumFractionDigits\":2,\"maximumFractionDigits\":2,\"roundingIncrement\":5}",
+    "value": 1.004,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "minimumFractionDigits": 2,
+      "maximumFractionDigits": 2,
+      "roundingIncrement": 5
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 1.00"
+  },
+  {
+    "name": "plural precision {\"style\":\"currency\",\"currency\":\"USD\"}",
+    "value": 1.004,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "style": "currency",
+      "currency": "USD"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: $1.00"
+  },
+  {
+    "name": "plural precision {\"style\":\"percent\"}",
+    "value": 1.004,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "style": "percent"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 100%"
+  },
+  {
+    "name": "plural precision {\"notation\":\"compact\"}",
+    "value": 1.004,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "notation": "compact"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: 1"
+  },
+  {
+    "name": "plural precision {\"numberingSystem\":\"arab\"}",
+    "value": 1.004,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "numberingSystem": "arab"
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "other: ١٫٠٠٤"
+  },
+  {
+    "name": "plural fallback other",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "other": "# item(s)"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "1 item(s)"
+  },
+  {
+    "name": "plural substitutes all hashes literally",
+    "value": 2,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "other": "$# & # <items>"
+      }
+    },
+    "locale": "en-US",
+    "status": "value",
+    "expected": "$2 & 2 <items>"
+  },
+  {
+    "name": "invalid plural {}",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {},
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid plural {\"forms\":{}}",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {}
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid plural {\"forms\":[]}",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": []
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid plural {\"forms\":{\"one\":\"one\"}}",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "one": "one"
+      }
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid plural {\"forms\":{\"other\":12}}",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "other": 12
+      }
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid plural {\"forms\":{\"other\":\"other\",\"unknown\":\"bad\"}}",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "other": "other",
+        "unknown": "bad"
+      }
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid plural {\"forms\":{\"zero\":\"zero: #\",\"one\":\"one: #\",\"two\":\"two: #\",\"few\":\"few: #\",\"many\":\"many: #\",\"other\":\"other: #\"},\"type\":\"invalid\"}",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "type": "invalid"
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  },
+  {
+    "name": "invalid plural {\"forms\":{\"zero\":\"zero: #\",\"one\":\"one: #\",\"two\":\"two: #\",\"few\":\"few: #\",\"many\":\"many: #\",\"other\":\"other: #\"},\"maximumFractionDigits\":101}",
+    "value": 1,
+    "inputType": "number",
+    "formatter": "plural",
+    "options": {
+      "forms": {
+        "zero": "zero: #",
+        "one": "one: #",
+        "two": "two: #",
+        "few": "few: #",
+        "many": "many: #",
+        "other": "other: #"
+      },
+      "maximumFractionDigits": 101
+    },
+    "locale": "en-US",
+    "status": "invalid",
+    "expected": null
+  }
+]

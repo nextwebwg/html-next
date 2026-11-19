@@ -1,0 +1,3385 @@
+[
+  {
+    "name": "list conjunction long 0",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": ""
+  },
+  {
+    "name": "list conjunction long 1",
+    "value": [
+      "Alice"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice"
+  },
+  {
+    "name": "list conjunction long 2",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice and Bob"
+  },
+  {
+    "name": "list conjunction long 3",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob, and Carol"
+  },
+  {
+    "name": "list parts conjunction long",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Bob"
+      },
+      {
+        "type": "literal",
+        "value": ", and "
+      },
+      {
+        "type": "element",
+        "value": "Carol"
+      }
+    ]
+  },
+  {
+    "name": "list conjunction short 0",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": ""
+  },
+  {
+    "name": "list conjunction short 1",
+    "value": [
+      "Alice"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice"
+  },
+  {
+    "name": "list conjunction short 2",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice & Bob"
+  },
+  {
+    "name": "list conjunction short 3",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob, & Carol"
+  },
+  {
+    "name": "list parts conjunction short",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Bob"
+      },
+      {
+        "type": "literal",
+        "value": ", & "
+      },
+      {
+        "type": "element",
+        "value": "Carol"
+      }
+    ]
+  },
+  {
+    "name": "list conjunction narrow 0",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": ""
+  },
+  {
+    "name": "list conjunction narrow 1",
+    "value": [
+      "Alice"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice"
+  },
+  {
+    "name": "list conjunction narrow 2",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob"
+  },
+  {
+    "name": "list conjunction narrow 3",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob, Carol"
+  },
+  {
+    "name": "list parts conjunction narrow",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "conjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Bob"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Carol"
+      }
+    ]
+  },
+  {
+    "name": "list disjunction long 0",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": ""
+  },
+  {
+    "name": "list disjunction long 1",
+    "value": [
+      "Alice"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice"
+  },
+  {
+    "name": "list disjunction long 2",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice or Bob"
+  },
+  {
+    "name": "list disjunction long 3",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob, or Carol"
+  },
+  {
+    "name": "list parts disjunction long",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Bob"
+      },
+      {
+        "type": "literal",
+        "value": ", or "
+      },
+      {
+        "type": "element",
+        "value": "Carol"
+      }
+    ]
+  },
+  {
+    "name": "list disjunction short 0",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": ""
+  },
+  {
+    "name": "list disjunction short 1",
+    "value": [
+      "Alice"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice"
+  },
+  {
+    "name": "list disjunction short 2",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice or Bob"
+  },
+  {
+    "name": "list disjunction short 3",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob, or Carol"
+  },
+  {
+    "name": "list parts disjunction short",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Bob"
+      },
+      {
+        "type": "literal",
+        "value": ", or "
+      },
+      {
+        "type": "element",
+        "value": "Carol"
+      }
+    ]
+  },
+  {
+    "name": "list disjunction narrow 0",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": ""
+  },
+  {
+    "name": "list disjunction narrow 1",
+    "value": [
+      "Alice"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice"
+  },
+  {
+    "name": "list disjunction narrow 2",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice or Bob"
+  },
+  {
+    "name": "list disjunction narrow 3",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob, or Carol"
+  },
+  {
+    "name": "list parts disjunction narrow",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "disjunction",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Bob"
+      },
+      {
+        "type": "literal",
+        "value": ", or "
+      },
+      {
+        "type": "element",
+        "value": "Carol"
+      }
+    ]
+  },
+  {
+    "name": "list unit long 0",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": ""
+  },
+  {
+    "name": "list unit long 1",
+    "value": [
+      "Alice"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice"
+  },
+  {
+    "name": "list unit long 2",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob"
+  },
+  {
+    "name": "list unit long 3",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob, Carol"
+  },
+  {
+    "name": "list parts unit long",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Bob"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Carol"
+      }
+    ]
+  },
+  {
+    "name": "list unit short 0",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": ""
+  },
+  {
+    "name": "list unit short 1",
+    "value": [
+      "Alice"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice"
+  },
+  {
+    "name": "list unit short 2",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob"
+  },
+  {
+    "name": "list unit short 3",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice, Bob, Carol"
+  },
+  {
+    "name": "list parts unit short",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Bob"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "Carol"
+      }
+    ]
+  },
+  {
+    "name": "list unit narrow 0",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": ""
+  },
+  {
+    "name": "list unit narrow 1",
+    "value": [
+      "Alice"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice"
+  },
+  {
+    "name": "list unit narrow 2",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice Bob"
+  },
+  {
+    "name": "list unit narrow 3",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice Bob Carol"
+  },
+  {
+    "name": "list parts unit narrow",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "element",
+        "value": "Bob"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "element",
+        "value": "Carol"
+      }
+    ]
+  },
+  {
+    "name": "inferred list",
+    "value": [
+      "One",
+      "Two"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": null,
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "One and Two"
+  },
+  {
+    "name": "list locale de-DE",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {},
+    "locale": "de-DE",
+    "operation": "format",
+    "expected": "Alice, Bob und Carol"
+  },
+  {
+    "name": "list locale fr-CA",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {},
+    "locale": "fr-CA",
+    "operation": "format",
+    "expected": "Alice, Bob et Carol"
+  },
+  {
+    "name": "list locale ja-JP",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {},
+    "locale": "ja-JP",
+    "operation": "format",
+    "expected": "Alice、Bob、Carol"
+  },
+  {
+    "name": "list locale ar-EG",
+    "value": [
+      "Alice",
+      "Bob",
+      "Carol"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {},
+    "locale": "ar-EG",
+    "operation": "format",
+    "expected": "Alice وBob وCarol",
+    "platformExpected": {
+      "macos-icu-78.1": "⁨Alice⁩ و⁨Bob⁩ و⁨Carol⁩"
+    }
+  },
+  {
+    "name": "list options {\"type\":\"invalid\"}",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "list options {\"style\":\"invalid\"}",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "style": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "list options {\"localeMatcher\":\"invalid\"}",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "localeMatcher": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "list options {\"unknownOption\":\"ignored\"}",
+    "value": [
+      "Alice",
+      "Bob"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "unknownOption": "ignored"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "Alice and Bob"
+  },
+  {
+    "name": "relative year always -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "year",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 year ago"
+  },
+  {
+    "name": "relative year always 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "year",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 0 years"
+  },
+  {
+    "name": "relative year always 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "year",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 year"
+  },
+  {
+    "name": "relative parts year always",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "year",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "year"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "year"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "year"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "year"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "year"
+      },
+      {
+        "type": "literal",
+        "value": " years"
+      }
+    ]
+  },
+  {
+    "name": "relative year auto -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "year",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "last year"
+  },
+  {
+    "name": "relative year auto 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "year",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "this year"
+  },
+  {
+    "name": "relative year auto 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "year",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "next year"
+  },
+  {
+    "name": "relative parts year auto",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "year",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "year"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "year"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "year"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "year"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "year"
+      },
+      {
+        "type": "literal",
+        "value": " years"
+      }
+    ]
+  },
+  {
+    "name": "relative quarter always -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 quarter ago"
+  },
+  {
+    "name": "relative quarter always 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 0 quarters"
+  },
+  {
+    "name": "relative quarter always 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 quarter"
+  },
+  {
+    "name": "relative parts quarter always",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "quarter"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "quarter"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "quarter"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "quarter"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "quarter"
+      },
+      {
+        "type": "literal",
+        "value": " quarters"
+      }
+    ]
+  },
+  {
+    "name": "relative quarter auto -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "last quarter"
+  },
+  {
+    "name": "relative quarter auto 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "this quarter"
+  },
+  {
+    "name": "relative quarter auto 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "next quarter"
+  },
+  {
+    "name": "relative parts quarter auto",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "quarter"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "quarter"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "quarter"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "quarter"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "quarter"
+      },
+      {
+        "type": "literal",
+        "value": " quarters"
+      }
+    ]
+  },
+  {
+    "name": "relative month always -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "month",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 month ago"
+  },
+  {
+    "name": "relative month always 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "month",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 0 months"
+  },
+  {
+    "name": "relative month always 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "month",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 month"
+  },
+  {
+    "name": "relative parts month always",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "month",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "month"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "month"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "month"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "month"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "month"
+      },
+      {
+        "type": "literal",
+        "value": " months"
+      }
+    ]
+  },
+  {
+    "name": "relative month auto -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "month",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "last month"
+  },
+  {
+    "name": "relative month auto 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "month",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "this month"
+  },
+  {
+    "name": "relative month auto 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "month",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "next month"
+  },
+  {
+    "name": "relative parts month auto",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "month",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "month"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "month"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "month"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "month"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "month"
+      },
+      {
+        "type": "literal",
+        "value": " months"
+      }
+    ]
+  },
+  {
+    "name": "relative week always -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "week",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 week ago"
+  },
+  {
+    "name": "relative week always 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "week",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 0 weeks"
+  },
+  {
+    "name": "relative week always 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "week",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 week"
+  },
+  {
+    "name": "relative parts week always",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "week",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "week"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "week"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "week"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "week"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "week"
+      },
+      {
+        "type": "literal",
+        "value": " weeks"
+      }
+    ]
+  },
+  {
+    "name": "relative week auto -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "week",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "last week"
+  },
+  {
+    "name": "relative week auto 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "week",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "this week"
+  },
+  {
+    "name": "relative week auto 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "week",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "next week"
+  },
+  {
+    "name": "relative parts week auto",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "week",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "week"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "week"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "week"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "week"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "week"
+      },
+      {
+        "type": "literal",
+        "value": " weeks"
+      }
+    ]
+  },
+  {
+    "name": "relative day always -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 day ago"
+  },
+  {
+    "name": "relative day always 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 0 days"
+  },
+  {
+    "name": "relative day always 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 day"
+  },
+  {
+    "name": "relative parts day always",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "day"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "day"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "day"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "day"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "day"
+      },
+      {
+        "type": "literal",
+        "value": " days"
+      }
+    ]
+  },
+  {
+    "name": "relative day auto -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "yesterday"
+  },
+  {
+    "name": "relative day auto 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "today"
+  },
+  {
+    "name": "relative day auto 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "tomorrow"
+  },
+  {
+    "name": "relative parts day auto",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "day"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "day"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "day"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "day"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "day"
+      },
+      {
+        "type": "literal",
+        "value": " days"
+      }
+    ]
+  },
+  {
+    "name": "relative hour always -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "hour",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 hour ago"
+  },
+  {
+    "name": "relative hour always 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "hour",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 0 hours"
+  },
+  {
+    "name": "relative hour always 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "hour",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 hour"
+  },
+  {
+    "name": "relative parts hour always",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "hour",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "hour"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "hour"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "hour"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "hour"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "hour"
+      },
+      {
+        "type": "literal",
+        "value": " hours"
+      }
+    ]
+  },
+  {
+    "name": "relative hour auto -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "hour",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 hour ago"
+  },
+  {
+    "name": "relative hour auto 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "hour",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "this hour"
+  },
+  {
+    "name": "relative hour auto 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "hour",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 hour"
+  },
+  {
+    "name": "relative parts hour auto",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "hour",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "hour"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "hour"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "hour"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "hour"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "hour"
+      },
+      {
+        "type": "literal",
+        "value": " hours"
+      }
+    ]
+  },
+  {
+    "name": "relative minute always -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "minute",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 minute ago"
+  },
+  {
+    "name": "relative minute always 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "minute",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 0 minutes"
+  },
+  {
+    "name": "relative minute always 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "minute",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 minute"
+  },
+  {
+    "name": "relative parts minute always",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "minute",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "minute"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "minute"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "minute"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "minute"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "minute"
+      },
+      {
+        "type": "literal",
+        "value": " minutes"
+      }
+    ]
+  },
+  {
+    "name": "relative minute auto -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "minute",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 minute ago"
+  },
+  {
+    "name": "relative minute auto 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "minute",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "this minute"
+  },
+  {
+    "name": "relative minute auto 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "minute",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 minute"
+  },
+  {
+    "name": "relative parts minute auto",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "minute",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "minute"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "minute"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "minute"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "minute"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "minute"
+      },
+      {
+        "type": "literal",
+        "value": " minutes"
+      }
+    ]
+  },
+  {
+    "name": "relative second always -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "second",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 second ago"
+  },
+  {
+    "name": "relative second always 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "second",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 0 seconds"
+  },
+  {
+    "name": "relative second always 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "second",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 second"
+  },
+  {
+    "name": "relative parts second always",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "second",
+      "numeric": "always"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "second"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "second"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "second"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "second"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "second"
+      },
+      {
+        "type": "literal",
+        "value": " seconds"
+      }
+    ]
+  },
+  {
+    "name": "relative second auto -1",
+    "value": -1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "second",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "1 second ago"
+  },
+  {
+    "name": "relative second auto 0",
+    "value": 0,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "second",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "now"
+  },
+  {
+    "name": "relative second auto 1",
+    "value": 1,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "second",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 1 second"
+  },
+  {
+    "name": "relative parts second auto",
+    "value": 1234.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "second",
+      "numeric": "auto"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "in "
+      },
+      {
+        "type": "integer",
+        "value": "1",
+        "unit": "second"
+      },
+      {
+        "type": "group",
+        "value": ",",
+        "unit": "second"
+      },
+      {
+        "type": "integer",
+        "value": "234",
+        "unit": "second"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "second"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "second"
+      },
+      {
+        "type": "literal",
+        "value": " seconds"
+      }
+    ]
+  },
+  {
+    "name": "relative style long day",
+    "value": -2.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 days ago"
+  },
+  {
+    "name": "relative style long quarter",
+    "value": -2.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 quarters ago"
+  },
+  {
+    "name": "relative style long seconds",
+    "value": -2.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "seconds",
+      "style": "long"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 seconds ago"
+  },
+  {
+    "name": "relative style short day",
+    "value": -2.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 days ago"
+  },
+  {
+    "name": "relative style short quarter",
+    "value": -2.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 qtrs. ago"
+  },
+  {
+    "name": "relative style short seconds",
+    "value": -2.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "seconds",
+      "style": "short"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5 sec. ago"
+  },
+  {
+    "name": "relative style narrow day",
+    "value": -2.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5d ago"
+  },
+  {
+    "name": "relative style narrow quarter",
+    "value": -2.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "quarter",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5q ago"
+  },
+  {
+    "name": "relative style narrow seconds",
+    "value": -2.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "seconds",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "2.5s ago"
+  },
+  {
+    "name": "relative negative zero",
+    "value": 0,
+    "negativeZero": true,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "0 days ago"
+  },
+  {
+    "name": "relative negative zero parts",
+    "value": 0,
+    "negativeZero": true,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "integer",
+        "value": "0",
+        "unit": "day"
+      },
+      {
+        "type": "literal",
+        "value": " days ago"
+      }
+    ]
+  },
+  {
+    "name": "relative locale de-DE",
+    "value": 3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "de-DE",
+    "operation": "format",
+    "expected": "in 3,5 Tagen"
+  },
+  {
+    "name": "relative parts locale de-DE",
+    "value": -3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "de-DE",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "vor "
+      },
+      {
+        "type": "integer",
+        "value": "3",
+        "unit": "day"
+      },
+      {
+        "type": "decimal",
+        "value": ",",
+        "unit": "day"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "day"
+      },
+      {
+        "type": "literal",
+        "value": " Tagen"
+      }
+    ]
+  },
+  {
+    "name": "relative locale fr-CA",
+    "value": 3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "fr-CA",
+    "operation": "format",
+    "expected": "dans 3,5 jours"
+  },
+  {
+    "name": "relative parts locale fr-CA",
+    "value": -3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "fr-CA",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "il y a "
+      },
+      {
+        "type": "integer",
+        "value": "3",
+        "unit": "day"
+      },
+      {
+        "type": "decimal",
+        "value": ",",
+        "unit": "day"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "day"
+      },
+      {
+        "type": "literal",
+        "value": " jours"
+      }
+    ]
+  },
+  {
+    "name": "relative locale ja-JP",
+    "value": 3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "ja-JP",
+    "operation": "format",
+    "expected": "3.5 日後"
+  },
+  {
+    "name": "relative parts locale ja-JP",
+    "value": -3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "ja-JP",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "integer",
+        "value": "3",
+        "unit": "day"
+      },
+      {
+        "type": "decimal",
+        "value": ".",
+        "unit": "day"
+      },
+      {
+        "type": "fraction",
+        "value": "5",
+        "unit": "day"
+      },
+      {
+        "type": "literal",
+        "value": " 日前"
+      }
+    ]
+  },
+  {
+    "name": "relative locale ar-EG",
+    "value": 3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "ar-EG",
+    "operation": "format",
+    "expected": "خلال ٣٫٥ يوم"
+  },
+  {
+    "name": "relative parts locale ar-EG",
+    "value": -3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "ar-EG",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": "قبل "
+      },
+      {
+        "type": "integer",
+        "value": "٣",
+        "unit": "day"
+      },
+      {
+        "type": "decimal",
+        "value": "٫",
+        "unit": "day"
+      },
+      {
+        "type": "fraction",
+        "value": "٥",
+        "unit": "day"
+      },
+      {
+        "type": "literal",
+        "value": " يوم"
+      }
+    ]
+  },
+  {
+    "name": "relative locale en-US-u-nu-arab",
+    "value": 3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "en-US-u-nu-arab",
+    "operation": "format",
+    "expected": "in ٣٫٥ days"
+  },
+  {
+    "name": "relative parts locale en-US-u-nu-arab",
+    "value": -3.5,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day"
+    },
+    "locale": "en-US-u-nu-arab",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "integer",
+        "value": "٣",
+        "unit": "day"
+      },
+      {
+        "type": "decimal",
+        "value": "٫",
+        "unit": "day"
+      },
+      {
+        "type": "fraction",
+        "value": "٥",
+        "unit": "day"
+      },
+      {
+        "type": "literal",
+        "value": " days ago"
+      }
+    ]
+  },
+  {
+    "name": "relative options {}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "relative options {\"unit\":\"days\"}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "days"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 12 days"
+  },
+  {
+    "name": "relative options {\"unit\":\"invalid\"}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "relative options {\"unit\":\"day\",\"numeric\":\"invalid\"}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numeric": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "relative options {\"unit\":\"day\",\"style\":\"invalid\"}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "style": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "relative options {\"unit\":\"day\",\"localeMatcher\":\"invalid\"}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "localeMatcher": "invalid"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "relative options {\"unit\":\"day\",\"numberingSystem\":\"arab\"}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numberingSystem": "arab"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in ١٢ days"
+  },
+  {
+    "name": "relative options {\"unit\":\"day\",\"numberingSystem\":\"notreal\"}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numberingSystem": "notreal"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 12 days"
+  },
+  {
+    "name": "relative options {\"unit\":\"day\",\"numberingSystem\":\"bad!\"}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "numberingSystem": "bad!"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": null
+  },
+  {
+    "name": "relative options {\"unit\":\"day\",\"unknownOption\":\"ignored\"}",
+    "value": 12,
+    "negativeZero": false,
+    "inputType": "number",
+    "formatter": "relativeTime",
+    "options": {
+      "unit": "day",
+      "unknownOption": "ignored"
+    },
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "in 12 days"
+  },
+  {
+    "name": "adjacent list parts en-US []",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": []
+  },
+  {
+    "name": "adjacent list parts en-US [\"\",\"\"]",
+    "value": [
+      "",
+      ""
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": " "
+      }
+    ]
+  },
+  {
+    "name": "adjacent list parts en-US [\"\",\"Alice\",\"\"]",
+    "value": [
+      "",
+      "Alice",
+      ""
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "element",
+        "value": "Alice"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      }
+    ]
+  },
+  {
+    "name": "adjacent list parts en-US [\"A\",\"B\",\"C\"]",
+    "value": [
+      "A",
+      "B",
+      "C"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "A"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "element",
+        "value": "B"
+      },
+      {
+        "type": "literal",
+        "value": " "
+      },
+      {
+        "type": "element",
+        "value": "C"
+      }
+    ]
+  },
+  {
+    "name": "adjacent list parts zh-CN []",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "zh-CN",
+    "operation": "formatParts",
+    "expected": []
+  },
+  {
+    "name": "adjacent list parts zh-CN [\"\",\"\"]",
+    "value": [
+      "",
+      ""
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "zh-CN",
+    "operation": "formatParts",
+    "expected": []
+  },
+  {
+    "name": "adjacent list parts zh-CN [\"\",\"Alice\",\"\"]",
+    "value": [
+      "",
+      "Alice",
+      ""
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "zh-CN",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      }
+    ]
+  },
+  {
+    "name": "adjacent list parts zh-CN [\"A\",\"B\",\"C\"]",
+    "value": [
+      "A",
+      "B",
+      "C"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "zh-CN",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "A"
+      },
+      {
+        "type": "element",
+        "value": "B"
+      },
+      {
+        "type": "element",
+        "value": "C"
+      }
+    ]
+  },
+  {
+    "name": "adjacent list parts ja-JP []",
+    "value": [],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "ja-JP",
+    "operation": "formatParts",
+    "expected": []
+  },
+  {
+    "name": "adjacent list parts ja-JP [\"\",\"\"]",
+    "value": [
+      "",
+      ""
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "ja-JP",
+    "operation": "formatParts",
+    "expected": []
+  },
+  {
+    "name": "adjacent list parts ja-JP [\"\",\"Alice\",\"\"]",
+    "value": [
+      "",
+      "Alice",
+      ""
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "ja-JP",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "Alice"
+      }
+    ]
+  },
+  {
+    "name": "adjacent list parts ja-JP [\"A\",\"B\",\"C\"]",
+    "value": [
+      "A",
+      "B",
+      "C"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {
+      "type": "unit",
+      "style": "narrow"
+    },
+    "locale": "ja-JP",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "A"
+      },
+      {
+        "type": "element",
+        "value": "B"
+      },
+      {
+        "type": "element",
+        "value": "C"
+      }
+    ]
+  },
+  {
+    "name": "escaped list text",
+    "value": [
+      "<tag>",
+      "&",
+      "safe"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {},
+    "locale": "en-US",
+    "operation": "format",
+    "expected": "<tag>, &, and safe"
+  },
+  {
+    "name": "escaped list parts",
+    "value": [
+      "<tag>",
+      "&",
+      "safe"
+    ],
+    "negativeZero": false,
+    "inputType": "list",
+    "formatter": "list",
+    "options": {},
+    "locale": "en-US",
+    "operation": "formatParts",
+    "expected": [
+      {
+        "type": "element",
+        "value": "<tag>"
+      },
+      {
+        "type": "literal",
+        "value": ", "
+      },
+      {
+        "type": "element",
+        "value": "&"
+      },
+      {
+        "type": "literal",
+        "value": ", and "
+      },
+      {
+        "type": "element",
+        "value": "safe"
+      }
+    ]
+  }
+]

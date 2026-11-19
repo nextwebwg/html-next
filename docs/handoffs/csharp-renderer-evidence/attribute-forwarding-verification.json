@@ -1,0 +1,358 @@
+{
+  "recordedAt": "2026-11-07T06:59:39.575747+00:00",
+  "baseCommit": "18a41efe",
+  "scope": "Incremental explicit attribute-forwarding implementation and consumer verification. The full C# ship-ready goal remains active.",
+  "authority": {
+    "proposalCommit": "https://github.com/nextwebwg/specs/commit/ee83bc3",
+    "ownerWords": [
+      "Ok let's do it. Update spec, update all frameworks",
+      "And specify in spec that order matters with examples like this",
+      "Oh!! And specify that it's ONLY the attributes not assigned to props"
+    ],
+    "implementationInterpretation": "Keep unclaimed invocation inputs separate from rendered roots. Apply them at authored destinations, through each receiving prop contract, in source order. Application layer metadata is written directly to the application-owned root.",
+    "approvalStatus": "Explicit forwarding and prop consumption are user-directed. The invalid whole-class ordering example below is awaiting an owner decision. No release authorization is inferred."
+  },
+  "verification": {
+    "repositoryGate": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "result": "pass",
+      "javascriptPassed": 2062,
+      "gatedSkips": 4898,
+      "nativePassed": 778,
+      "nativeSkipped": 0,
+      "fluidCompleteOutputsValidated": 5,
+      "packedConsumersPassed": 8,
+      "sourceSuiteSeconds": 372.37,
+      "packedConsumerSeconds": 58.02
+    },
+    "attributeBrowserMatrix": {
+      "passed": 84,
+      "dimensions": {
+        "runtimesAndTargets": [
+          "live",
+          "vanilla",
+          "vue",
+          "react",
+          "preact",
+          "svelte",
+          "angular"
+        ],
+        "engines": [
+          "Chromium",
+          "Firefox",
+          "WebKit"
+        ],
+        "modes": [
+          "development",
+          "production"
+        ],
+        "rendering": [
+          "fresh",
+          "hydrated"
+        ]
+      },
+      "seconds": 198.760584208,
+      "sourceQualification": "Before unused React style import cleanup and type-only Vue annotation. Subsequent focused React/Preact four cases and Vue two cases pass. Runtime style folding is unchanged by those cleanups."
+    },
+    "lifecycleBrowser": {
+      "passed": 58,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "seconds": 108.136302208,
+      "scope": "Explicit forwarding, component registry, compiled hot replacement and legacy in-repository HTMLKit navigation. Unchanged assertions."
+    },
+    "vueDeclarationRegression": {
+      "before": "TS2698: Spread types may only be created from object types.",
+      "after": "pass",
+      "entry": "checks row-local native bindings and forwarded style modifiers",
+      "method": "Real vue-tsc against public converter output. Full Looma declaration generation reproduced the same error before the type annotation."
+    },
+    "firefoxTransport": {
+      "host": "Linux arm64 Docker through public Playwright BrowserType.connect and loopback exposure",
+      "version": "1.64.0",
+      "image": "mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f",
+      "reason": "Local Firefox cannot launch. No engine cases were skipped."
+    }
+  },
+  "performance": {
+    "scope": "Production React19 class-only row updates, Chromium, flushSync. 2 warmup rounds, 9 alternating paired samples. React bundled; full DOM proven outside timing. Browser qualification should be idle during timing.",
+    "baseline": "18a41efe",
+    "bundle": {
+      "baselineRaw": 29454,
+      "baselineGzip": 9794,
+      "currentRaw": 30772,
+      "currentGzip": 10291,
+      "fullSsrEqual": true
+    },
+    "updates": [
+      {
+        "rows": 100,
+        "baselineMedianMs": 0.0962499998509884,
+        "currentMedianMs": 0.10124999992549419,
+        "ratio": 1.0519480528025626,
+        "fullDomProofs": [
+          {
+            "name": "baseline",
+            "active": 0,
+            "count": 100,
+            "characters": 1523,
+            "sha256": "066fe6030e7846e366a420e760b8145b184be43115e869270be3f585045dbbd7"
+          },
+          {
+            "name": "baseline",
+            "active": 99,
+            "count": 100,
+            "characters": 1533,
+            "sha256": "a34ba1c1d75011152b3c77a54f4b42d4ea236d757bb5f9a5aeb6701cea57c041"
+          },
+          {
+            "name": "current",
+            "active": 0,
+            "count": 100,
+            "characters": 1523,
+            "sha256": "066fe6030e7846e366a420e760b8145b184be43115e869270be3f585045dbbd7"
+          },
+          {
+            "name": "current",
+            "active": 99,
+            "count": 100,
+            "characters": 1533,
+            "sha256": "a34ba1c1d75011152b3c77a54f4b42d4ea236d757bb5f9a5aeb6701cea57c041"
+          }
+        ]
+      },
+      {
+        "rows": 1000,
+        "baselineMedianMs": 0.8125,
+        "currentMedianMs": 0.8337500002235174,
+        "ratio": 1.0261538464289446,
+        "fullDomProofs": [
+          {
+            "name": "baseline",
+            "active": 0,
+            "count": 1000,
+            "characters": 12332,
+            "sha256": "3c785d569b99f9f74d922f0b23bc7fc2d80fef3b62c756638a44e44c2d7abb9c"
+          },
+          {
+            "name": "baseline",
+            "active": 999,
+            "count": 1000,
+            "characters": 12343,
+            "sha256": "52e74268a0f0e2b3cd923e0d4b73444ac154c67f852ad5202f3f900b0ec8b74f"
+          },
+          {
+            "name": "current",
+            "active": 0,
+            "count": 1000,
+            "characters": 12332,
+            "sha256": "3c785d569b99f9f74d922f0b23bc7fc2d80fef3b62c756638a44e44c2d7abb9c"
+          },
+          {
+            "name": "current",
+            "active": 999,
+            "count": 1000,
+            "characters": 12343,
+            "sha256": "52e74268a0f0e2b3cd923e0d4b73444ac154c67f852ad5202f3f900b0ec8b74f"
+          }
+        ]
+      }
+    ],
+    "environment": {
+      "react": "19.3.0",
+      "playwright": "1.64.0",
+      "node": "24.20.0",
+      "platform": "macOS arm64",
+      "qualification": "One foreground browser benchmark. Root verify:pr finished; unrelated machine workloads uncontrolled. Looma preparation start compared with report completion below."
+    },
+    "bundleHashes": {
+      "baseline": "2120cd7611b951658686121e07b0bef49b75b10a306c57207aeda7c249cc4379",
+      "current": "6ac226d6abbde0b0bba2a391cd4c47acd406709a68e05a1590ac3360dcea07a3"
+    },
+    "qualification": "Class-only React19 rows in Chromium. Own verification and browser qualification were idle during timing; timing report preceded Looma preparation. Other machine workloads were uncontrolled. CSS-heavy workloads and native C# speed/memory still require measurement."
+  },
+  "consumers": {
+    "markupkit": {
+      "repository": "threadlabs-studio/markupkit",
+      "baseCommit": "dcc6d63772ee7b9c065cead3a12464adca95ecc6",
+      "sourceCheckout": "private detached trial; main dirty checkout untouched",
+      "repositoryGate": {
+        "result": "pass",
+        "sourcePassed": 143,
+        "gatedSkips": 81,
+        "installedNpmConsumerPassed": 1,
+        "docsPagesBuilt": 20
+      },
+      "browser": {
+        "result": "pass",
+        "passed": 81,
+        "engines": [
+          "Chromium",
+          "Firefox",
+          "WebKit"
+        ],
+        "seconds": 232.86756108400002,
+        "assertions": "unchanged",
+        "history": "An earlier candidate run passed80/81 with a WebKit manifest pageerror during navigation. An unchanged focused run and this complete current run pass. Native fetch cancellation control did not reproduce the error; no cause is claimed fixed."
+      },
+      "sdkArtifact": {
+        "metadataVersion": "1.0.0-alpha.91",
+        "sha256": "a3dcbe8b5a237613d5b82689565a7a0fa85bdfb6125d0a35d48d321152aee5a5",
+        "qualification": "Current private development candidate, not behavior of the published alpha.91. Packed using pnpm with ignore-scripts after SDK build; catalog references resolved. No publication."
+      },
+      "releaseCoordination": "Prepared MarkupKit0.8.0 requires SDK>=1.0.0-alpha.92. Candidate override is local and must be removed before delivery; dependent changes remain uncommitted."
+    },
+    "looma": {
+      "baseCommit": "714d557c0e042a16a274f107f77dcccd67070b69",
+      "components": 106,
+      "completeCatalogsCompiled": 6,
+      "targets": [
+        "html-next",
+        "vue",
+        "react",
+        "preact",
+        "svelte",
+        "angular"
+      ],
+      "compileSeconds": 24.93,
+      "browserQualification": "Pending fresh full catalog behavior across all targets and three engines. Earlier partial results do not qualify this source."
+    }
+  },
+  "review": {
+    "method": "One bounded combined inline inspection under the owner single-agent and cross-model-off instructions. No independent or external reviewers.",
+    "covered": [
+      "logical invocation and root ownership",
+      "ordered write retention and prop consumption",
+      "request-local C# forwarding frames",
+      "CSSOM browser/server split and framework numeric units",
+      "URL and namespace handling",
+      "prototype-named inputs",
+      "initial state reads",
+      "hydration and hot replacement",
+      "test and consumer coverage"
+    ],
+    "verdict": "Not ready for merge: development checkpoint with a pending semantic choice and incomplete whole-goal qualification."
+  },
+  "openJudgments": [
+    {
+      "subject": "Initially invalid whole-class binding after a class modifier",
+      "input": "<button class:active=\"true\" class=\"base\" from:class=\"1 / 0\">",
+      "withoutForwarding": "base active",
+      "withEmptyForwarding": "base",
+      "status": "Owner clarification requested. Existing class-default behavior and draft fallback/source-order wording need one consistent interpretation. The observed outputs are not an approved expected-value contract."
+    }
+  ],
+  "remainingGoal": [
+    "Complete real Looma behavior qualification across all JavaScript targets and three engines.",
+    "Complete native accepted-child lists/borrowed-slot iteration, keyed styles, standalone CSS, shared client-plan consumption, preparation and interoperable hydration.",
+    "Complete matching Fluid/Node speed, allocation, retained and peak memory qualification.",
+    "Resolve the class-ordering judgment and coordinated dependent package floors, complete final bounded review and commit/push the resulting work."
+  ],
+  "sourceHashes": {
+    "CHANGELOG.md": "9e1fe1b6152819822f95e41468367c8e2607d5d10a38978428503ab2230b585f",
+    "README.md": "0c705d521b452fa2683b08aa3a349a061ca416259072a3a57c5e8a194150deae",
+    "docs/guide/quick-start.md": "29ef39f489fe45b07c12836eead2bd6a04aa98b3ed9a765d8d094b2035895e02",
+    "packages/html-next-converter/src/index.ts": "2f34b01ab9ee47e3a8c8a6995563b4c4ee2343a11533998e80d0e0091b85ba54",
+    "packages/html-next-converter/tests/angular.test.ts": "b381116a8b05ee8bdb1bec7579d5a1ebeb989045f8abada9cc5bfd5033a56f17",
+    "packages/html-next-converter/tests/attribute-forwarding-parity.test.ts": "dd9c7576ad70c8293ea7bf0ddeda8789546b610618bf14bccc326538d16f84e1",
+    "packages/html-next-converter/tests/converter.test.ts": "8ce04695fd48943e5b183c89a4dbd8883d06a48b85e896deb53a279eae4f2395",
+    "packages/html-next-converter/tests/react-composition-types.test.ts": "e2fed6ef9925b2ebbe8e550165dba77270f7d5904db87eee17207df8e2f6ae5c",
+    "packages/html-next-converter/tests/svelte-converter.test.ts": "bd1978f11c24bc5a06ea8d5aa6a150a3986105bd434f9c1e4aec0e8a72fac171",
+    "packages/html-next-converter/tests/vue-installed-types.test.ts": "cf0f032174d9f8e2c073d577f5a2d10591932fe41602ca3e0ce327ae7a38c218",
+    "packages/html-next-dotnet/README.md": "4cd567db210a7f461f98eeda93a8f038d0455f48f90c20690ef76cda4678b056",
+    "packages/html-next-dotnet/src/HtmlNext/ClassBinding.cs": "88109614a623c0e209427d9780c64eff6de6e7e4cdaade538144309e6e88febd",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "5d9316e9ae8a8ec0190652c922c02cde08c8cc6d499893e024f41de8d00e5eed",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentCall.cs": "8f632473ed0540d5045a8fdb593ee9ebc5bdd1698dd3de280b1776bc5eacf1b8",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentGraph.cs": "272aca36c952940651aa01502b49828b5b2d7b87ee21e539acf6ebe41bc79941",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "b69f659c68a83274caac69f84e7cdc96bfba150bb2152112c1bae525bbc77092",
+    "packages/html-next-dotnet/src/HtmlNext/InvocationAttributes.cs": "6686f2f169afb0d687e1101d461e3ef249afac52d785d33b743f10b01583d48e",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/AttributeForwardingTests.cs": "a77dc5f6152f6432ce0c40d6b4d543dbf74c4b7fdc38bd0d475050dc9d5628de",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HtmlNext.Tests.csproj": "6ac794fd40db09798e54ec8f6d765a02efd36dd792337dc0239bebc3de94cf41",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/InvocationAttributeTests.cs": "d18aeb4c23fedeb078608156d88a2399f2b79a56bfa1afdbf570e43a468b8f2a",
+    "packages/html-next-dotnet/tests/fixtures/accepted-children.json": "8e696e90581122b661dad4add4688d4214b1c748891d97d10840bbd1c2c24a47",
+    "packages/html-next-dotnet/tests/fixtures/attribute-forwarding.json": "9115d03842dcf049b8782f7a877405f404ce5babb22ef8e5bf69d1a8c6e16717",
+    "packages/html-next-dotnet/tests/fixtures/deferred-components.json": "9fa77c28084765d4161e1421269b4f1a734b1d63cbfe38ad9de4fbdb0131554d",
+    "packages/html-next-dotnet/tests/fixtures/invocation-attributes.json": "bdae0fd66cfc6941a6b3c7c3d32e51f86fc254b970171b3f4c06a7a74b7e102b",
+    "packages/html-next-unplugin/src/framework.ts": "de16a1caee5cfc727c8162f06de92ca702026c40fd3b1c6a32135bc91c73a6a5",
+    "packages/html-next-unplugin/tests/framework.test.ts": "c8bf4a196b4269e7fe59c19f81d031bc7c5e28aa24c570feaa72afd42c89f8c5",
+    "packages/html-next-unplugin/tests/unplugin.test.ts": "ae3ceeaa9069828e9c1d988ff4d53f97919090a83a8c8fa62abd129b0b99b7e8",
+    "packages/html-next/docs/component-registry.md": "7173067c68c6641be40e95248e8bbd3223189b96d4a07017c5c833ba5fb02b5a",
+    "packages/html-next/docs/server-rendering.md": "bee4e2233619db06f8bf75eb521552763659d95d9034eab3cd7111e401efb5b9",
+    "packages/html-next/examples/generated/docs/x-button.md": "f9cc729023b499c07c0948ba605db9e7176a1f9884d9a970a0aceb51618c7835",
+    "packages/html-next/examples/generated/vanilla/XButton.js": "40e0b6daa50098c39aca70a0139646832dd1c4acd687cd03b041bb8752da5930",
+    "packages/html-next/examples/generated/vue/XButton.vue": "8e33d8e43d500c5ffb53d0a3f3e971e97787d645a38a00ec32628a4198d3043d",
+    "packages/html-next/examples/generated/vue/attributes.ts": "a6b13ad945ce3a57afc54b3dc66ed68a479f9bf5cc51f8f14d800dccab291ace",
+    "packages/html-next/examples/generated/vue/host.ts": "717f69447939a167f54af047d5fc0d0c35400a9351ef2d38d94fdb0f4999ca0c",
+    "packages/html-next/examples/generated/vue/props.ts": "6b3adce59102070f3aeb29977918009a143342c764d5a5d9fbb20079ff4230a3",
+    "packages/html-next/examples/x-button.html": "d558fe7be306ba71eca6130fe825ee2c43795bdc4688ff3f302d41db1ddd0f2f",
+    "packages/html-next/scripts/generate-literal-source.ts": "684e10288180bd8ee2faad71f4725a4bdc5967b911676b164cb0f74adf3da6d5",
+    "packages/html-next/src/dom-attributes.ts": "f7973c5149a90af83d079476344747fac1dec3069ec4fecccb4b6905d921b74b",
+    "packages/html-next/src/generate.ts": "a5d2db0a50c92d6188c95f2868b426ec88a6df2815df5c807393a8d3db63e1f4",
+    "packages/html-next/src/generated-runtime.ts": "c13cbfff324add9778322e8531b50728b19cdc16e6b3fd260a10f6ca570b7755",
+    "packages/html-next/src/generated/dom-attributes-source.ts": "8fbb378cb7ba3ead8f01c4bf3c65e3e04ec43b6ebaf74364fe940684dce5e48d",
+    "packages/html-next/src/index.ts": "ff325ee28cf373a279802a987072914d3f2c7d6875f91051cfd49c893844b971",
+    "packages/html-next/src/parser.ts": "55211ff41acc2d598449e269745e7a34e7e165900f9757cb72c968dbec758f36",
+    "packages/html-next/src/rendered-form.ts": "fb39205d4ea84950b4b42e4371c18614a75a5a3e3e53059b2c49c93ebe96a677",
+    "packages/html-next/src/runtime.ts": "13ede3cabb9e81fb1ad3546c67e45199c994c2dca147328018501eba8613f7ff",
+    "packages/html-next/src/server-worker.ts": "36b0a178e440dca67dcc869daa58c11b97507cc461462ee1c3c00ed1e669ef56",
+    "packages/html-next/src/server.ts": "349b09ead4a00050cbec2997f2efc25c327949a00f18171b038301409c546935",
+    "packages/html-next/src/targets/angular-native-view.ts": "315c4c57fbdad1cf0a09cc92470238672130851d0801f1d363e9d114c63a9fb1",
+    "packages/html-next/src/targets/angular.ts": "99d2c877e2e0ce293839071e514557753243a20309cd81dbdf1b8a6ef475d66d",
+    "packages/html-next/src/targets/attribute-helper.ts": "a66ad5156a9dc516a9c1e82f4c7071e5ba54dfb8345e7cbdf9d3314e6dbf30c7",
+    "packages/html-next/src/targets/class-text.ts": "8a4e8214f55ca1b0255760a41c247f4adf5f0f35a193428cd08a9285bf694405",
+    "packages/html-next/src/targets/docs.ts": "a106678f88d4f22967f74b7def744b327d8707c6b724db33f07c626597589a06",
+    "packages/html-next/src/targets/html-props.ts": "acb65d86c7d6ab372993b4dd4709207abb9ca779a2b9547de93fecd2ebe573a7",
+    "packages/html-next/src/targets/inline-style.ts": "47e935385b9093bf4498f5fbe91255a5f8a6c567441f710fa8841042e71dca8e",
+    "packages/html-next/src/targets/invocation-attributes.ts": "390b3ba345d7cfebf939ed74f13a4a33d683096d4eed745173449ba581f9fd86",
+    "packages/html-next/src/targets/react-render.ts": "8e63c75e8cb94fff04cc0e2564dae249ecacdaf34adf622dd765c79c7a4e3050",
+    "packages/html-next/src/targets/react.ts": "1e6822d31a428a64e94e10049cbce3cf77cf864fd52df00c6555a3afae75a720",
+    "packages/html-next/src/targets/shared.ts": "9beced40bc68543be80bb5118a9ae5f479531c9621d9c4837d60a9253913f60b",
+    "packages/html-next/src/targets/style-writes.ts": "4c4fa4681e3c44dbb491381b739b7192fd9a40cb9c92b33e1ba96bb7c1e12271",
+    "packages/html-next/src/targets/svelte-decorations.ts": "b1798236ef06f1bf6c2a4803a9afe9137e39baa30b99e601cffdb88bb0047e9a",
+    "packages/html-next/src/targets/svelte-props.ts": "1b4c5325df575d3cc81b2288e148f6ce6f87894ac834aedbf56bd65c9a82a04d",
+    "packages/html-next/src/targets/svelte-render.ts": "5824c05f4fda64fec51b176b0c68d510dd9385e6c56cd4327fe38496afb547ea",
+    "packages/html-next/src/targets/svelte.ts": "f65e543094fc278f57f46ae48ab4e238d9381c165931a6255d98eed8482aced6",
+    "packages/html-next/src/targets/vanilla-blocks.ts": "d222b1b224142addbeb3886c9e9eb90370f7112a09885360d6bc1560a70dbede",
+    "packages/html-next/src/targets/vue-format.ts": "76f0add962de763af0e1939679300438c7af3538e3cf62f482f40a958caa2d7a",
+    "packages/html-next/src/targets/vue-host.ts": "5f2ff37f298feeda732cd353ba3b57e71961d11960cc00ac4f480e5ba533c4c2",
+    "packages/html-next/src/targets/vue-lowering.ts": "957bc9a8fda00315a810b9c2e89530aeb801cd9c018b400402bb3e0c08e510d2",
+    "packages/html-next/src/targets/vue-props.ts": "3dfe09dfdeddca20b5864f71b3592f2f46b8f0043cde3d40b5da5dd9b1c82cdd",
+    "packages/html-next/src/targets/vue.ts": "dc66f61c6ae0bce86c7d58e2cc6ce40985a741f911d64c6051f395104d5df982",
+    "packages/html-next/src/template.ts": "7a57ef28fc5115d88e5119b30d3e3395ddfb8718091b285bb77820aa95b495e8",
+    "packages/html-next/tests/attribute-forwarding-browser.test.ts": "48d5f62efd443cac75b548733f003d550dac99361f0cbd7b7e45631d60600d53",
+    "packages/html-next/tests/attribute-forwarding-hot.ts": "23dbd554ace1af6c95af1bd903492e32223def85c5f862d75691a87839b4d4d0",
+    "packages/html-next/tests/cli.test.ts": "f24d549de688f819316939ddc124166e5a0107b28f68a113f6555bd77e4d930d",
+    "packages/html-next/tests/compiled-hydration.test.ts": "805f93cbb4ae6b5462fc75889d6f586eba547dedce1001e7ff73a6f017ddb584",
+    "packages/html-next/tests/compiled-interop.test.ts": "3d9465a1a4151e71433ae434d88d75e178f239bf375192f33431799ff10c477b",
+    "packages/html-next/tests/component-registry-browser.test.ts": "1142765497569a0bcca9a702cf8bff428d270b99e8cab51441843c1c52199d7c",
+    "packages/html-next/tests/component-registry.test.ts": "b2254bb7bef8173a0c1af9ff85a2b80b752f664f2eecfd51f3fa229e3098ce3c",
+    "packages/html-next/tests/fixtures/x-button.html": "46d1afc6f46c93fdede1aafbf76be4b588b887f802e6ba66e9f52cf3ba45dbb9",
+    "packages/html-next/tests/formatting-fixture.ts": "82284bdbc140ec91fb101391fa427ace95bb73baa3e5cb17a24974f101597577",
+    "packages/html-next/tests/generate.test.ts": "7d35b0a154bcf6b21b94dfd1a42a09e78d77c80375b0b47b4a3c1977c6a4469c",
+    "packages/html-next/tests/head.test.ts": "1301f0c289161bdbfedf0d651205ca465c6d11e4d4aea84c4f4d82ad8fa86b8b",
+    "packages/html-next/tests/hot-replacement.ts": "d1745df762c2559db420343acb3b71b0858dc6f6dada974c11ac13d5dae4f15f",
+    "packages/html-next/tests/hydration-fixtures.ts": "d6cc4eb544fcfa6810ea9db087708a97ca6ab8f9dcc329afee3ff605be554582",
+    "packages/html-next/tests/live-reference.ts": "6b750fa1143cc86c73f3bdf45d851e98fbeeb21cdea0b196370f5037927b7409",
+    "packages/html-next/tests/native-attribute-forwarding.test.ts": "b83fbfd628ee74aee0e58f5bc86e50fc994a1cb5404d2cb131318dc797554c06",
+    "packages/html-next/tests/numeric-fixture.ts": "60e5adc1e89b9eacf3a979507b9a8e3f56cb0b76f274eb0f09a7ce444a81c9fc",
+    "packages/html-next/tests/package.test.ts": "88eb4db238815995febe7cbd6889ff50d50d1a1af714adcbc5bcb8cffaf2556a",
+    "packages/html-next/tests/parser.test.ts": "ad4a32565732170353249896ae1cf22c1b81b523bbab46b70685311a3f2d077c",
+    "packages/html-next/tests/pixel-parity.ts": "bb1ff65cc50473fd5589b1e9224fd67edd72ea66263b88658aaaa08029b03f8c",
+    "packages/html-next/tests/server.test.ts": "859d3cea32edb703dc4fa264a9e4e909d2ca60ba4cfc21ce29322032308433c5",
+    "packages/html-next/tests/snapshots/x-button.json": "6e3f1146f5803afd4ec36c19b76cc8e0de5e3d0453c03070071dfabd4a72cab2",
+    "packages/html-next/tests/targets.test.ts": "6f9097a565f19525afed87e5a3e69d4b4605c7ccce198978c0168574ba2afa3e",
+    "packages/html-next/tests/vanilla-blocks.test.ts": "4a143054f686cad959b79ee5f6b96bd3d6ce76ab16ee3412e960c63d43c47a04",
+    "packages/html-next/tests/vue-binding-preparation.test.ts": "ba876e3a0d925e83d1ca7f1b42236ff8bd02c093ac0fc8d5ee8d142f098e9c6f",
+    "packages/htmlkit/src/client.ts": "1842b2f6d7fe6592921e2b55c8f82fe4c9df4a469124871ea328a658895ef821",
+    "packages/htmlkit/src/server.ts": "c67663aabd14a7952d7dc9020ab3e55a2cd844c334b0085a3f054f68bb79ed05",
+    "packages/htmlkit/tests/client-navigation.test.ts": "bbb1ec249708445de23a4551039eec65fefb0ce220d313fd53e063bf70374591",
+    "packages/htmlkit/tests/fixture.ts": "219fcf7784dac83585ef2a58e60d9987418f7f1ab89b8ae6e45977aee88b7a04",
+    "tests/package.test.ts": "abc217694c53d54e1f83594a9d5e3f3d71c7fb13e1bca024fd41a656e88f2987",
+    "tsconfig.json": "27375199af6a6575faebe7a0a5c240dcce584f31bbbc52e09780006e1aa43ded",
+    "vitest.browser.config.ts": "545b60efa53aa57749b013736b9a1dc4098f9be63640da023bfecd7f8db83839",
+    "vitest.targets.config.ts": "34b27cdbdf3cd324f55a5e3dc04b7c41c9b498cb5e74b84adbde636ed50f2858"
+  }
+}

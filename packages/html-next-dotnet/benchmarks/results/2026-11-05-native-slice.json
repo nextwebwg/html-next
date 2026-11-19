@@ -1,0 +1,578 @@
+{
+  "date": "2026-11-05",
+  "baseRevision": "cdaaa1ecc5963f1cc5d0175d388162aed2804125",
+  "nativeSourceSha256": "7f2a11890277e38a87c71ff0c4bdc27619c757951c3040887c077842c640c22e",
+  "fluidVersion": "2.41.1",
+  "benchmarkDotNetVersion": "0.15.8",
+  "scope": "Experimental inert template/data-binding slice; no CSS, hydration, modules, graph loading, or complete language support.",
+  "method": "Two sequential BenchmarkDotNet ShortRun runs, one launch, three warmup iterations and three measured iterations per method/case. Complete output validated before timing; cached plans/templates and string-returning output on both sides.",
+  "receipts": [
+    {
+      "name": "card",
+      "rows": 0,
+      "bytes": 75,
+      "compileOnceNs": 69033000,
+      "liquidParseOnceNs": 39500700,
+      "outputSha256": "35bde7a7db4efb9760819b971219e35b6fa276b9d8a9e784173184d788b68f6d",
+      "templateSha256": "d63428c5c873f732f089d7d262292c7784989ed531ef3766434fa368c76667fa",
+      "liquidSha256": "7c7ef7d35a1fc737293d91f3c4776ef9f1a10483bf62cd5e2cb16f4540a1c828",
+      "modelSha256": "645c51dbbe297f595345a0eab02a906e108c0b18609081ee200560d4f5ef1fcc",
+      "fluidVersion": "2.41.1.0",
+      "angleSharpVersion": "1.9.1.0",
+      "nativeAssemblySha256": "c0cc63ad4759a5049f85f3bf36e8a70c7f7c8370c1e66bd7c5b6bfb323355560"
+    },
+    {
+      "name": "list-10",
+      "rows": 10,
+      "bytes": 589,
+      "compileOnceNs": 69950600,
+      "liquidParseOnceNs": 40149000,
+      "outputSha256": "fb48b479b07b9993530dded2dac571fff7999f41a34dfc7a3a4b769e930797bb",
+      "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+      "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+      "modelSha256": "97614a4243bfaebe2d05be8dab8df1f1a99251d249f22ae11aac821107a5a0b8",
+      "fluidVersion": "2.41.1.0",
+      "angleSharpVersion": "1.9.1.0",
+      "nativeAssemblySha256": "c0cc63ad4759a5049f85f3bf36e8a70c7f7c8370c1e66bd7c5b6bfb323355560"
+    },
+    {
+      "name": "list-100",
+      "rows": 100,
+      "bytes": 5989,
+      "compileOnceNs": 67187200,
+      "liquidParseOnceNs": 36166900,
+      "outputSha256": "4c56e0194b5004fc2d16775df5d2e417686b9d7122df620c3ee85ee236585240",
+      "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+      "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+      "modelSha256": "e39a426097cace6a6bf2190e8a73466b2718df29aafe2f9d4b586ea152ed1a4f",
+      "fluidVersion": "2.41.1.0",
+      "angleSharpVersion": "1.9.1.0",
+      "nativeAssemblySha256": "c0cc63ad4759a5049f85f3bf36e8a70c7f7c8370c1e66bd7c5b6bfb323355560"
+    },
+    {
+      "name": "list-1000",
+      "rows": 1000,
+      "bytes": 61789,
+      "compileOnceNs": 68212500,
+      "liquidParseOnceNs": 38802000,
+      "outputSha256": "9202f2e82e1d681907bb5a417734231b27968c5b33545cb0a08f747b9dfe25ce",
+      "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+      "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+      "modelSha256": "7ced73a5e2bb2cd17aa428c7641c5a8ab445be27518662fc54d66f52fdd5f575",
+      "fluidVersion": "2.41.1.0",
+      "angleSharpVersion": "1.9.1.0",
+      "nativeAssemblySha256": "c0cc63ad4759a5049f85f3bf36e8a70c7f7c8370c1e66bd7c5b6bfb323355560"
+    }
+  ],
+  "runs": [
+    {
+      "name": "initial",
+      "environment": {
+        "BenchmarkDotNetCaption": "BenchmarkDotNet",
+        "BenchmarkDotNetVersion": "0.15.8",
+        "OsVersion": "macOS 27.2 (26B123) [Darwin 27.2.0]",
+        "ProcessorName": "Apple M4 Pro",
+        "PhysicalProcessorCount": 1,
+        "PhysicalCoreCount": 14,
+        "LogicalCoreCount": 14,
+        "RuntimeVersion": ".NET 10.0.5 (10.0.5, 10.0.526.15411)",
+        "Architecture": "Arm64",
+        "HasAttachedDebugger": false,
+        "HasRyuJit": true,
+        "Configuration": "RELEASE",
+        "DotNetCliVersion": "10.0.201",
+        "ChronometerFrequency": {
+          "Hertz": 1000000000
+        },
+        "HardwareTimerKind": "Unknown"
+      },
+      "results": [
+        {
+          "case": "card",
+          "engine": "HtmlNext",
+          "meanNs": 160.9966026941935,
+          "medianNs": 160.8234944343567,
+          "stdDevNs": 2.1515082591774806,
+          "ci999": {
+            "N": 3,
+            "Mean": 160.9966026941935,
+            "StandardError": 1.2421738725998215,
+            "Level": 12,
+            "Margin": 39.25151983487494,
+            "Lower": 121.74508285931857,
+            "Upper": 200.24812252906844
+          },
+          "samplesNs": [
+            160.8234944343567,
+            158.93687796592712,
+            163.22943568229675
+          ],
+          "allocatedBytes": 848
+        },
+        {
+          "case": "card",
+          "engine": "Liquid",
+          "meanNs": 237.16409381230673,
+          "medianNs": 238.09786701202393,
+          "stdDevNs": 1.6756969667763064,
+          "ci999": {
+            "N": 3,
+            "Mean": 237.16409381230673,
+            "StandardError": 0.9674640948485399,
+            "Level": 12,
+            "Margin": 30.57095061015716,
+            "Lower": 206.59314320214958,
+            "Upper": 267.7350444224639
+          },
+          "samplesNs": [
+            238.09786701202393,
+            238.1648621559143,
+            235.22955226898193
+          ],
+          "allocatedBytes": 704
+        },
+        {
+          "case": "list-10",
+          "engine": "HtmlNext",
+          "meanNs": 1572.847261428833,
+          "medianNs": 1574.9588031768799,
+          "stdDevNs": 4.283818130306454,
+          "ci999": {
+            "N": 3,
+            "Mean": 1572.847261428833,
+            "StandardError": 2.4732635506918306,
+            "Level": 12,
+            "Margin": 78.15278960397895,
+            "Lower": 1494.694471824854,
+            "Upper": 1651.000051032812
+          },
+          "samplesNs": [
+            1567.9175853729248,
+            1574.9588031768799,
+            1575.6653957366943
+          ],
+          "allocatedBytes": 7120
+        },
+        {
+          "case": "list-10",
+          "engine": "Liquid",
+          "meanNs": 2150.4557914733887,
+          "medianNs": 2151.6480445861816,
+          "stdDevNs": 11.46026202662621,
+          "ci999": {
+            "N": 3,
+            "Mean": 2150.4557914733887,
+            "StandardError": 6.616585366056289,
+            "Level": 12,
+            "Margin": 209.07784124563545,
+            "Lower": 1941.3779502277532,
+            "Upper": 2359.5336327190244
+          },
+          "samplesNs": [
+            2138.4460105895996,
+            2151.6480445861816,
+            2161.2733192443848
+          ],
+          "allocatedBytes": 4648
+        },
+        {
+          "case": "list-100",
+          "engine": "HtmlNext",
+          "meanNs": 14842.071950276693,
+          "medianNs": 14832.67529296875,
+          "stdDevNs": 123.81908363663422,
+          "ci999": {
+            "N": 3,
+            "Mean": 14842.071950276693,
+            "StandardError": 71.48698126842356,
+            "Level": 12,
+            "Margin": 2258.921013464942,
+            "Lower": 12583.150936811751,
+            "Upper": 17100.992963741635
+          },
+          "samplesNs": [
+            14832.67529296875,
+            14970.321655273438,
+            14723.21890258789
+          ],
+          "allocatedBytes": 60256
+        },
+        {
+          "case": "list-100",
+          "engine": "Liquid",
+          "meanNs": 18492.203379313152,
+          "medianNs": 18525.734588623047,
+          "stdDevNs": 432.81171597712984,
+          "ci999": {
+            "N": 3,
+            "Mean": 18492.203379313152,
+            "StandardError": 249.88396072781978,
+            "Level": 12,
+            "Margin": 7896.096880863132,
+            "Lower": 10596.106498450019,
+            "Upper": 26388.300260176286
+          },
+          "samplesNs": [
+            18043.601318359375,
+            18525.734588623047,
+            18907.27423095703
+          ],
+          "allocatedBytes": 37770
+        },
+        {
+          "case": "list-1000",
+          "engine": "HtmlNext",
+          "meanNs": 176683.8175048828,
+          "medianNs": 176623.96228027344,
+          "stdDevNs": 2913.231835649661,
+          "ci999": {
+            "N": 3,
+            "Mean": 176683.8175048828,
+            "StandardError": 1681.9551845241197,
+            "Level": 12,
+            "Margin": 53148.193455835135,
+            "Lower": 123535.62404904768,
+            "Upper": 229832.01096071795
+          },
+          "samplesNs": [
+            176623.96228027344,
+            173800.9744873047,
+            179626.5157470703
+          ],
+          "allocatedBytes": 558032
+        },
+        {
+          "case": "list-1000",
+          "engine": "Liquid",
+          "meanNs": 216866.03983561197,
+          "medianNs": 216219.58947753906,
+          "stdDevNs": 1884.3901344868907,
+          "ci999": {
+            "N": 3,
+            "Mean": 216866.03983561197,
+            "StandardError": 1087.9531514042815,
+            "Level": 12,
+            "Margin": 34378.29086871907,
+            "Lower": 182487.7489668929,
+            "Upper": 251244.33070433105
+          },
+          "samplesNs": [
+            216219.58947753906,
+            218988.5711669922,
+            215389.9588623047
+          ],
+          "allocatedBytes": 502919
+        }
+      ]
+    },
+    {
+      "name": "confirmation",
+      "environment": {
+        "BenchmarkDotNetCaption": "BenchmarkDotNet",
+        "BenchmarkDotNetVersion": "0.15.8",
+        "OsVersion": "macOS 27.2 (26B123) [Darwin 27.2.0]",
+        "ProcessorName": "Apple M4 Pro",
+        "PhysicalProcessorCount": 1,
+        "PhysicalCoreCount": 14,
+        "LogicalCoreCount": 14,
+        "RuntimeVersion": ".NET 10.0.5 (10.0.5, 10.0.526.15411)",
+        "Architecture": "Arm64",
+        "HasAttachedDebugger": false,
+        "HasRyuJit": true,
+        "Configuration": "RELEASE",
+        "DotNetCliVersion": "10.0.201",
+        "ChronometerFrequency": {
+          "Hertz": 1000000000
+        },
+        "HardwareTimerKind": "Unknown"
+      },
+      "results": [
+        {
+          "case": "card",
+          "engine": "HtmlNext",
+          "meanNs": 169.5040762424469,
+          "medianNs": 169.42599415779114,
+          "stdDevNs": 4.128801281946728,
+          "ci999": {
+            "N": 3,
+            "Mean": 169.5040762424469,
+            "StandardError": 2.3837645315624156,
+            "Level": 12,
+            "Margin": 75.3247052254148,
+            "Lower": 94.1793710170321,
+            "Upper": 244.8287814678617
+          },
+          "samplesNs": [
+            173.67136478424072,
+            169.42599415779114,
+            165.41486978530884
+          ],
+          "allocatedBytes": 848
+        },
+        {
+          "case": "card",
+          "engine": "Liquid",
+          "meanNs": 248.3244342803955,
+          "medianNs": 244.82846307754517,
+          "stdDevNs": 6.4646971798755954,
+          "ci999": {
+            "N": 3,
+            "Mean": 248.3244342803955,
+            "StandardError": 3.7323946570305897,
+            "Level": 12,
+            "Margin": 117.94014199106773,
+            "Lower": 130.3842922893278,
+            "Upper": 366.2645762714632
+          },
+          "samplesNs": [
+            244.36050701141357,
+            255.78433275222778,
+            244.82846307754517
+          ],
+          "allocatedBytes": 704
+        },
+        {
+          "case": "list-10",
+          "engine": "HtmlNext",
+          "meanNs": 1837.5789051055908,
+          "medianNs": 1856.6582202911377,
+          "stdDevNs": 60.38640806447067,
+          "ci999": {
+            "N": 3,
+            "Mean": 1837.5789051055908,
+            "StandardError": 34.86410895141673,
+            "Level": 12,
+            "Margin": 1101.6728770567536,
+            "Lower": 735.9060280488372,
+            "Upper": 2939.251782162344
+          },
+          "samplesNs": [
+            1769.9573822021484,
+            1856.6582202911377,
+            1886.1211128234863
+          ],
+          "allocatedBytes": 7120
+        },
+        {
+          "case": "list-10",
+          "engine": "Liquid",
+          "meanNs": 2371.6364936828613,
+          "medianNs": 2346.5965538024902,
+          "stdDevNs": 56.62751435025813,
+          "ci999": {
+            "N": 3,
+            "Mean": 2371.6364936828613,
+            "StandardError": 32.69391065366093,
+            "Level": 12,
+            "Margin": 1033.0966628817705,
+            "Lower": 1338.5398308010908,
+            "Upper": 3404.733156564632
+          },
+          "samplesNs": [
+            2346.5965538024902,
+            2331.845600128174,
+            2436.46732711792
+          ],
+          "allocatedBytes": 4648
+        },
+        {
+          "case": "list-100",
+          "engine": "HtmlNext",
+          "meanNs": 16001.198252360025,
+          "medianNs": 16195.860565185547,
+          "stdDevNs": 600.3295499737554,
+          "ci999": {
+            "N": 3,
+            "Mean": 16001.198252360025,
+            "StandardError": 346.6004272798346,
+            "Level": 12,
+            "Margin": 10952.245773513714,
+            "Lower": 5048.952478846311,
+            "Upper": 26953.444025873738
+          },
+          "samplesNs": [
+            15327.693939208984,
+            16480.040252685547,
+            16195.860565185547
+          ],
+          "allocatedBytes": 60256
+        },
+        {
+          "case": "list-100",
+          "engine": "Liquid",
+          "meanNs": 19827.111979166668,
+          "medianNs": 19420.32113647461,
+          "stdDevNs": 882.0318872803551,
+          "ci999": {
+            "N": 3,
+            "Mean": 19827.111979166668,
+            "StandardError": 509.2413475551467,
+            "Level": 12,
+            "Margin": 16091.545068859112,
+            "Lower": 3735.566910307556,
+            "Upper": 35918.65704802578
+          },
+          "samplesNs": [
+            19420.32113647461,
+            19221.884399414062,
+            20839.130401611328
+          ],
+          "allocatedBytes": 37770
+        },
+        {
+          "case": "list-1000",
+          "engine": "HtmlNext",
+          "meanNs": 192261.4442138672,
+          "medianNs": 192145.60974121094,
+          "stdDevNs": 294.64628141328177,
+          "ci999": {
+            "N": 3,
+            "Mean": 192261.4442138672,
+            "StandardError": 170.11410988968046,
+            "Level": 12,
+            "Margin": 5375.445020874325,
+            "Lower": 186885.99919299287,
+            "Upper": 197636.8892347415
+          },
+          "samplesNs": [
+            192042.31774902344,
+            192596.4051513672,
+            192145.60974121094
+          ],
+          "allocatedBytes": 558032
+        },
+        {
+          "case": "list-1000",
+          "engine": "Liquid",
+          "meanNs": 217109.7224934896,
+          "medianNs": 217341.62890625,
+          "stdDevNs": 1899.3910018746476,
+          "ci999": {
+            "N": 3,
+            "Mean": 217109.7224934896,
+            "StandardError": 1096.613906228681,
+            "Level": 12,
+            "Margin": 34651.962531981,
+            "Lower": 182457.7599615086,
+            "Upper": 251761.6850254706
+          },
+          "samplesNs": [
+            215105.02612304688,
+            218882.51245117188,
+            217341.62890625
+          ],
+          "allocatedBytes": 502919
+        }
+      ]
+    }
+  ],
+  "nodeAdapter": [
+    {
+      "name": "card",
+      "engine": "Node inert benchmark adapter",
+      "node": "v24.20.0",
+      "cpu": "Apple M4 Pro",
+      "compileMs": 5.055500000000009,
+      "medianNs": 533.5750000000019,
+      "samplesNs": [
+        442.33320000000157,
+        448.2832000000002,
+        455.3500000000014,
+        476.8833999999998,
+        533.5750000000019,
+        541.3418000000007,
+        620.1166000000001,
+        671.5249999999997,
+        697.7915999999993
+      ],
+      "iterations": 5000,
+      "bytes": 75,
+      "outputSha256": "35bde7a7db4efb9760819b971219e35b6fa276b9d8a9e784173184d788b68f6d",
+      "templateSha256": "d63428c5c873f732f089d7d262292c7784989ed531ef3766434fa368c76667fa",
+      "modelSha256": "645c51dbbe297f595345a0eab02a906e108c0b18609081ee200560d4f5ef1fcc",
+      "limitations": "Benchmark-only inert adapter; parser/type checks/expressions are production code. No Node worker, DOM, CSS, or hydration work. Node allocations not measured."
+    },
+    {
+      "name": "list-10",
+      "engine": "Node inert benchmark adapter",
+      "node": "v24.20.0",
+      "cpu": "Apple M4 Pro",
+      "compileMs": 1.2585830000000158,
+      "medianNs": 8022.816599999998,
+      "samplesNs": [
+        7926.7834,
+        7929.750000000002,
+        7974.433399999998,
+        8016.316800000004,
+        8022.816599999998,
+        8125.791600000003,
+        8185.075,
+        8238.2,
+        8349.766799999998
+      ],
+      "iterations": 5000,
+      "bytes": 589,
+      "outputSha256": "fb48b479b07b9993530dded2dac571fff7999f41a34dfc7a3a4b769e930797bb",
+      "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+      "modelSha256": "97614a4243bfaebe2d05be8dab8df1f1a99251d249f22ae11aac821107a5a0b8",
+      "limitations": "Benchmark-only inert adapter; parser/type checks/expressions are production code. No Node worker, DOM, CSS, or hydration work. Node allocations not measured."
+    },
+    {
+      "name": "list-100",
+      "engine": "Node inert benchmark adapter",
+      "node": "v24.20.0",
+      "cpu": "Apple M4 Pro",
+      "compileMs": 0.7569589999999948,
+      "medianNs": 79059.33399999981,
+      "samplesNs": [
+        77382.41599999992,
+        77402.918,
+        78121.16600000013,
+        78900.0840000001,
+        79059.33399999981,
+        79256.24999999991,
+        79714.33400000002,
+        80564.83400000002,
+        82098.25
+      ],
+      "iterations": 500,
+      "bytes": 5989,
+      "outputSha256": "4c56e0194b5004fc2d16775df5d2e417686b9d7122df620c3ee85ee236585240",
+      "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+      "modelSha256": "e39a426097cace6a6bf2190e8a73466b2718df29aafe2f9d4b586ea152ed1a4f",
+      "limitations": "Benchmark-only inert adapter; parser/type checks/expressions are production code. No Node worker, DOM, CSS, or hydration work. Node allocations not measured."
+    },
+    {
+      "name": "list-1000",
+      "engine": "Node inert benchmark adapter",
+      "node": "v24.20.0",
+      "cpu": "Apple M4 Pro",
+      "compileMs": 0.46354200000007495,
+      "medianNs": 853867.5000000012,
+      "samplesNs": [
+        808605.819999998,
+        831340.8400000025,
+        836541.6600000025,
+        842776.6599999996,
+        853867.5000000012,
+        880833.3399999993,
+        919099.1599999961,
+        963166.6600000017,
+        973350.0000000003
+      ],
+      "iterations": 50,
+      "bytes": 61789,
+      "outputSha256": "9202f2e82e1d681907bb5a417734231b27968c5b33545cb0a08f747b9dfe25ce",
+      "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+      "modelSha256": "7ced73a5e2bb2cd17aa428c7641c5a8ab445be27518662fc54d66f52fdd5f575",
+      "limitations": "Benchmark-only inert adapter; parser/type checks/expressions are production code. No Node worker, DOM, CSS, or hydration work. Node allocations not measured."
+    }
+  ],
+  "limitations": [
+    "ShortRun screen on one shared workstation, not a general performance ranking.",
+    "Priority elevation was unavailable.",
+    "Node is a benchmark-only inert adapter using production parser/type checks/expression evaluation, not the public worker/DOM renderer or a generated Node SSR backend.",
+    "Node latency harness differs from BenchmarkDotNet and does not measure allocations.",
+    "First compilation observations in validation receipts include JIT/setup effects and are not a controlled cold-start benchmark."
+  ]
+}

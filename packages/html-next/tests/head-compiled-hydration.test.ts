@@ -42,7 +42,7 @@ const source = `<template component="docs-layout"><defs>
 </defs><article>Languages</article></template>
 <template component="language-peer"><defs><link rel="alternate" hreflang="x-default" href="https://docs.example/"></defs><aside>Peer</aside></template>`;
 const definitions = parseComponentResource(source, "https://app.example/app.html").definitions;
-// A build reads its components from files, as HTMLKit does.
+// An application build reads its components from files.
 const widget = parseComponentResource(`<template component="x-widget"><defs>
   <script name="widget" src="/kit/widget.js"></script>
 </defs><div from:data-ok="$widget.ok"></div></template>`, "file:///app/widget.html").definitions;
@@ -51,7 +51,7 @@ const authoredHead = '<meta charset="utf-8"><title>Acme</title><meta name="descr
 describe.skipIf(!enabled)("head declarations through compiled hydration, in every engine", () => {
   let compiled = "";
   let page = "";
-  /** Rendered at HTMLKit's default origin, to be served from another. */
+  /** Rendered at a default origin, to be served from another. */
   let elsewhere = "";
   let languages = "";
 

@@ -3,7 +3,8 @@ import { Lowering, mayProduceInvalidResult, typeOf, type Scope } from "./vue-low
 
 /** Keep JavaScript lookup semantics while allowing HTML Next's absent keys in strict TSX. */
 export class TypeScriptLowering extends Lowering {
-  override value(node: ExpressionNode, scope: Scope): string {
+  override value(node: ExpressionNode, scope: Scope, base = false): string {
+    if (scope.references !== undefined || base) return super.value(node, scope, base);
     if (node.kind !== "index") return super.value(node, scope);
     const object = this.value(node.object, scope);
     const typed = typeOf(node.object, scope);

@@ -1,6 +1,11 @@
 <div align="center">
 
-# HTML Next
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup-dark.svg">
+    <img src="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup.svg" alt="HTML Next" width="280">
+  </picture>
+</h1>
 
 ### Universal components. Built with HTML.
 
@@ -18,6 +23,8 @@ Author once. Use native DOM, Vue, React, or Svelte.
 ## Write HTML. Keep your options.
 
 HTML Next brings markup, state, events, slots, and scoped styles together in one component file. Build native DOM with Vite, load components directly in a browser, or generate Vue, React, and Svelte components.
+
+For full-stack applications, [render with Node or C# and hydrate with JavaScript](https://nextwebwg.org/html-next/full-stack). Both runnable examples use identical component definitions: the server renders request data, then browser interaction continues the declared state and computed dependencies. The [C# implementation](https://www.nuget.org/packages/NextWebWG.HtmlNext) is published on NuGet.
 
 ```html
 <template component="x-counter">
@@ -71,6 +78,12 @@ npm install @nextwebwg/html-next
 | **Component libraries** · Share your HTML sources | [Publish a library](https://nextwebwg.org/html-next/ship) |
 | **Framework source** · Generate components ahead of time | [Converter](https://nextwebwg.org/html-next/convert) |
 
+## Speed and size
+
+[![HTML Next browser rendering speed and gzip JavaScript size compared with vanilla JavaScript, Solid, Svelte, Vue and React Hooks](https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/performance/frameworks-speed-size-2026-11-10.svg)](https://nextwebwg.org/html-next/performance)
+
+The site uses this same SVG. It comes from one full standard js-framework-benchmark sweep of SDK `1.0.0-alpha.94`: all seven entries, all nine keyed workloads, and the standard sample counts. Size includes the benchmark application and its used runtime. [Exact versions, raw data, method and limits](https://nextwebwg.org/html-next/performance) explain both panels. Individual workloads and other applications can rank differently.
+
 ## Package entry points
 
 | Import | Purpose |
@@ -83,8 +96,11 @@ npm install @nextwebwg/html-next
 | `@nextwebwg/html-next/node-loader` | Load a checked build graph, with optional [host implementation boundaries](docs/native-build-boundaries.md). |
 | `@nextwebwg/html-next/forms` | Build native form requests with validation, encoding, and cancellation. |
 | `@nextwebwg/html-next/validation` | Use the shared validity model. |
+| `@nextwebwg/html-next/inputs` | Read component inputs or implement a renderer adapter with `createInputPort` and `INPUT_PORT`. |
 
 `@nextwebwg/html-next` also exports `add`, `subtract`, `multiply`, and `divide`, the number arithmetic expressions use: `add(0.1, 0.2)` is `0.3`, as `$a + $b` would be, where JavaScript gives `0.30000000000000004`. A controller that calculates a value an expression also calculates gets the same result from them. Each is a separate function, so a bundle keeps only the ones it calls. They never throw: `divide(1, 0)` is `Infinity`, which a `number` declaration rejects.
+
+Generated controller declarations distinguish inputs from accepted values. A caller can clear any prop with `null`. Its accepted value returns to the declared default, or to `null` when no default exists. The generated read type reflects that default; `required` affects validity and does not make a missing value non-null. State with a non-null `value` likewise returns to it when cleared. These APIs follow the [public null and missing value rules](https://nextwebwg.org/declarative-components/types#null-and-missing-values).
 
 Importing `forms` pulls in no component runtime. Generated native components import the helpers their features need; generated Vue, React, and Svelte components use their target framework without an HTML Next runtime dependency.
 

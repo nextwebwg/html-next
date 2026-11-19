@@ -1,0 +1,186 @@
+[
+  {
+    "name": "empty-fallbacks",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header>Untitled</header><main>Empty</main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" fallback=\"\"?>Untitled<?end?></header><main><?start slot=\"\" fallback=\"\"?>Empty<?end?></main></section></div>"
+  },
+  {
+    "name": "default-text",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card>Body</x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header>Untitled</header><main>Body</main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" fallback=\"\"?>Untitled<?end?></header><main><?start slot=\"\"?>Body<?end?></main></section></div>"
+  },
+  {
+    "name": "named-and-default",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card><h2 slot=\"title\">Heading</h2><p>Body</p></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header><h2 slot=\"title\">Heading</h2></header><main><p>Body</p></main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\"?><h2 slot=\"title\">Heading</h2><?end?></header><main><?start slot=\"\"?><p>Body</p><?end?></main></section></div>"
+  },
+  {
+    "name": "false-assignment",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card><h2 slot=\"title\" $if=\"false\">Hidden</h2></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header>Untitled</header><main>Empty</main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" fallback=\"\"?>Untitled<?end?></header><main><?start slot=\"\" fallback=\"\"?>Empty<?end?></main></section></div>"
+  },
+  {
+    "name": "true-assignment",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card><h2 slot=\"title\" $if=\"true\">Heading</h2></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header><h2 slot=\"title\">Heading</h2></header><main>Empty</main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\"?><h2 slot=\"title\">Heading</h2><?end?></header><main><?start slot=\"\" fallback=\"\"?>Empty<?end?></main></section></div>"
+  },
+  {
+    "name": "empty-iteration",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card><b $each=\"row of []\">{$row}</b></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header>Untitled</header><main>Empty</main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" fallback=\"\"?>Untitled<?end?></header><main><?start slot=\"\" fallback=\"\"?>Empty<?end?></main></section></div>"
+  },
+  {
+    "name": "filtered-iteration",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card><b $each=\"row of [1, 2, 3]\" $where=\"$row > 1\">{$row}</b></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header>Untitled</header><main><b>2</b><b>3</b></main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" fallback=\"\"?>Untitled<?end?></header><main><?start slot=\"\"?><b>2</b><b>3</b><?end?></main></section></div>"
+  },
+  {
+    "name": "empty-text-node",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs><prop name=\"text\" type=\"string\" default=\"\">Text.</prop></defs><div><x-card>{$text}</x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header>Untitled</header><main></main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" fallback=\"\"?>Untitled<?end?></header><main><?start slot=\"\"?><?end?></main></section></div>"
+  },
+  {
+    "name": "consumer-scope",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs><state name=\"label\" type=\"string\" value=\"Caller\"></state></defs><div><x-card><b>{$label}</b></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header>Untitled</header><main><b>Caller</b></main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" fallback=\"\"?>Untitled<?end?></header><main><?start slot=\"\"?><b>Caller</b><?end?></main></section></div>"
+  },
+  {
+    "name": "lazy-template",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"title\"><h2>Template</h2></template><h2 slot=\"title\">Ignored</h2></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header><h2>Template</h2></header><main>Empty</main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" scoped=\"\"?><h2>Template</h2><?end?></header><main><?start slot=\"\" fallback=\"\"?>Empty<?end?></main><template carrier=\"x-card\"><template slot=\"title\"><h2>Template</h2></template><h2 slot=\"title\">Ignored</h2></template></section></div>"
+  },
+  {
+    "name": "first-template",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"title\"><h2>First</h2></template><template slot=\"title\"><h2>Second</h2></template></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header><h2>First</h2></header><main>Empty</main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" scoped=\"\"?><h2>First</h2><?end?></header><main><?start slot=\"\" fallback=\"\"?>Empty<?end?></main><template carrier=\"x-card\"><template slot=\"title\"><h2>First</h2></template><template slot=\"title\"><h2>Second</h2></template></template></section></div>"
+  },
+  {
+    "name": "empty-template",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card><template slot=\"title\"></template></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header></header><main>Empty</main></section></div>",
+    "native": "<div><section><header><?marker slot=\"title\"?></header><main><?start slot=\"\" fallback=\"\"?>Empty<?end?></main><template carrier=\"x-card\"><template slot=\"title\"></template></template></section></div>"
+  },
+  {
+    "name": "comment-projection",
+    "source": "<template component=\"x-card\"><section><header><slot name=\"title\">Untitled</slot></header><main><slot>Empty</slot></main></section></template><template component=\"x-page\"><defs></defs><div><x-card><!-- only comment --></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><header>Untitled</header><main>Empty</main></section></div>",
+    "native": "<div><section><header><?start slot=\"title\" fallback=\"\"?>Untitled<?end?></header><main><?start slot=\"\" fallback=\"\"?>Empty<?end?></main></section></div>"
+  },
+  {
+    "name": "fragment-value",
+    "source": "<template component=\"x-card\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><div><x-card><template $value=\"'Text'\"></template></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section>Text</section></div>",
+    "native": "<div><section><?start slot=\"\"?>Text<?end?></section></div>"
+  },
+  {
+    "name": "fragment-with",
+    "source": "<template component=\"x-card\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><div><x-card><template $with=\"'Alias' as label\"><b>{$label}</b></template></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><b>Alias</b></section></div>",
+    "native": "<div><section><?start slot=\"\"?><b>Alias</b><?end?></section></div>"
+  },
+  {
+    "name": "fragment-match",
+    "source": "<template component=\"x-card\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><div><x-card><template $match><b $when=\"false\">No</b><i $else>Yes</i></template></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><i>Yes</i></section></div>",
+    "native": "<div><section><?start slot=\"\"?><i>Yes</i><?end?></section></div>"
+  },
+  {
+    "name": "fragment-match-empty",
+    "source": "<template component=\"x-card\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><div><x-card><template $match><b $when=\"false\">No</b></template></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section>Fallback</section></div>",
+    "native": "<div><section><?start slot=\"\" fallback=\"\"?>Fallback<?end?></section></div>"
+  },
+  {
+    "name": "parser-safe-outlet",
+    "source": "<template component=\"x-card\"><section><template $slot>Fallback</template></section></template><template component=\"x-page\"><div><x-card><b>Body</b></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><b>Body</b></section></div>",
+    "native": "<div><section><?start slot=\"\"?><b>Body</b><?end?></section></div>"
+  },
+  {
+    "name": "layout-only",
+    "source": "<template component=\"x-card\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><div><x-card> \t </x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section>Fallback</section></div>",
+    "native": "<div><section><?start slot=\"\" fallback=\"\"?>Fallback<?end?></section></div>"
+  },
+  {
+    "name": "between-defaults",
+    "source": "<template component=\"x-card\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><div><x-card><b>A</b>\n  <i>B</i></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><b>A</b>\n  <i>B</i></section></div>",
+    "native": "<div><section><?start slot=\"\"?><b>A</b>\n  <i>B</i><?end?></section></div>"
+  },
+  {
+    "name": "nonbreaking-space",
+    "source": "<template component=\"x-card\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><div><x-card>\u00a0</x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section>&nbsp;</section></div>",
+    "native": "<div><section><?start slot=\"\"?>\u00a0<?end?></section></div>"
+  },
+  {
+    "name": "comment-split-text",
+    "source": "<template component=\"x-card\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><div><x-card> <!-- comment -->Text</x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section> Text</section></div>",
+    "native": "<div><section><?start slot=\"\"?> Text<?end?></section></div>"
+  },
+  {
+    "name": "beside-named",
+    "source": "<template component=\"x-card\"><section><slot>Fallback</slot></section></template><template component=\"x-page\"><div><x-card><b slot=\"title\">Named</b> <i>Default</i></x-card></div></template>",
+    "entry": "x-page",
+    "model": {},
+    "expected": "<div><section><i>Default</i></section></div>",
+    "native": "<div><section><?start slot=\"\"?><i>Default</i><?end?><template carrier=\"x-card\"><b slot=\"title\">Named</b></template></section></div>"
+  }
+]

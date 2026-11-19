@@ -1,0 +1,86 @@
+[
+  {
+    "name": "valid-literal-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"3\"></state></defs><main><x-leaf value=\"7\" from:value=\"$input\"></x-leaf></main></template>",
+    "expected": "<main><b>3</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "valid-binding-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"3\"></state></defs><main><x-leaf from:value=\"$input\" value=\"7\"></x-leaf></main></template>",
+    "expected": "<main><b>3</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "zero-literal-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"0\"></state></defs><main><x-leaf value=\"7\" from:value=\"$input\"></x-leaf></main></template>",
+    "expected": "<main><b>0</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "zero-binding-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"0\"></state></defs><main><x-leaf from:value=\"$input\" value=\"7\"></x-leaf></main></template>",
+    "expected": "<main><b>0</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "null-literal-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"null\"></state></defs><main><x-leaf value=\"7\" from:value=\"$input\"></x-leaf></main></template>",
+    "expected": "<main><b>5</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "null-binding-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"null\"></state></defs><main><x-leaf from:value=\"$input\" value=\"7\"></x-leaf></main></template>",
+    "expected": "<main><b>5</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "absent-literal-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"$record.missing\"></state></defs><main><x-leaf value=\"7\" from:value=\"$input\"></x-leaf></main></template>",
+    "expected": "<main><b>5</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "absent-binding-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"$record.missing\"></state></defs><main><x-leaf from:value=\"$input\" value=\"7\"></x-leaf></main></template>",
+    "expected": "<main><b>5</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "nonfinite-literal-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"1 / 0\"></state></defs><main><x-leaf value=\"7\" from:value=\"1 / 0\"></x-leaf></main></template>",
+    "expected": "<main><b>7</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "nonfinite-binding-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"1 / 0\"></state></defs><main><x-leaf from:value=\"1 / 0\" value=\"7\"></x-leaf></main></template>",
+    "expected": "<main><b>7</b></main>",
+    "diagnostics": 0
+  },
+  {
+    "name": "wrong-type-literal-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"'bad'\"></state></defs><main><x-leaf value=\"7\" from:value=\"$input\"></x-leaf></main></template>",
+    "expected": "<main><b>7</b></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "wrong-type-binding-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"'bad'\"></state></defs><main><x-leaf from:value=\"$input\" value=\"7\"></x-leaf></main></template>",
+    "expected": "<main><b>7</b></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "fraction-literal-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"1.5\"></state></defs><main><x-leaf value=\"7\" from:value=\"$input\"></x-leaf></main></template>",
+    "expected": "<main><b>7</b></main>",
+    "diagnostics": 1
+  },
+  {
+    "name": "fraction-binding-first",
+    "source": "<template component=\"x-leaf\"><defs><prop name=\"value\" type=\"integer\" default=\"5\">Value.</prop></defs><b>{$value}</b></template><template component=\"x-page\"><defs><state name=\"record\" type=\"object({ ... })\" value=\"{}\"></state><state name=\"input\" type=\"unknown\" from=\"1.5\"></state></defs><main><x-leaf from:value=\"$input\" value=\"7\"></x-leaf></main></template>",
+    "expected": "<main><b>7</b></main>",
+    "diagnostics": 1
+  }
+]

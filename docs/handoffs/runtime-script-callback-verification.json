@@ -1,0 +1,74 @@
+{
+  "recordedAt": "2026-11-08T23:57:39.938311+00:00",
+  "base": "695a071f",
+  "scope": "Release unreachable component callbacks from document-lifetime script entries. Independent runtime correction; React projection reassessment remains unfinished.",
+  "sourceHashes": {
+    "CHANGELOG.md": "8a6413a3a91afc41c5b2be3997fcc327b2f75c895117ddff0559f4adf3ae4939",
+    "packages/html-next/src/head.ts": "42c50ef943b1faa7ccd8cb19610abb1981e95e3fa3129576c2618fa71e6343dd",
+    "packages/html-next/src/generated/head-source.ts": "2003d68293138ce0109750a7aad504e830a4dc0def11e3f754995c2d02d9f2e5",
+    "packages/html-next/tests/head.test.ts": "dc4df505b28f1a8da4c1a92aff00bd3f96630d692b17b94f51486ce3f7aa4faf",
+    "packages/html-next/scripts/measure-runtime-size.ts": "41de912b0af78a1a3196e643420e58715f8d5bb9ebd4c18c0141d658599194c0"
+  },
+  "implementation": {
+    "nativeMechanisms": "Native load/error events and shared script promises remain document-owned. WeakRef subscribers and a module-owned FinalizationRegistry release unreachable instance callbacks.",
+    "remainingGap": "A document-lifetime entry previously kept every callback owner alive after its handle became unreachable. Disconnection alone cannot release ownership because retained disconnected hosts still read shared status.",
+    "compatibility": "Preserve the existing Set<Binding> shared document-manager shape. Retained handles own their bindings; disconnected status remains current and automatic handlers retain existing connection guards.",
+    "generatedLiteral": "Regenerated from the final source."
+  },
+  "proof": {
+    "ownershipBefore": "The disconnected owner remains alive after native GC with strong entry subscriptions.",
+    "ownershipAfter": "The owner is collected with weak subscribers. Retained disconnected hosts continue to read pending/error status and reconnect normally.",
+    "focusedPrimary": {
+      "passed": 24,
+      "skipped": 0,
+      "seconds": 5.71,
+      "coverage": "22 head tests plus2 complete runtime-size report tests."
+    },
+    "focusedReleaseSourcePort": {
+      "passed": 24,
+      "skipped": 0,
+      "seconds": 8.15
+    }
+  },
+  "size": {
+    "headScriptGzipBytes": 17207,
+    "headScriptDeltaGzipBytes": 106,
+    "staticHeadGzipBytes": 15021,
+    "staticHeadDeltaGzipBytes": -1,
+    "ordinaryFixtureDeltaGzipBytes": 0,
+    "meaning": "Exact measured baselines, no extra allowance. No runtime latency or general memory benchmark claim."
+  },
+  "review": {
+    "mode": "One bounded inline correctness and simplification pass; follow-up limited to the measured size mismatch from the first gate.",
+    "activeFindings": 0
+  },
+  "repositoryGate": {
+    "command": "corepack pnpm verify:pr",
+    "status": "passed",
+    "exitCode": 0,
+    "javascript": {
+      "passed": 2138,
+      "explicitlyGatedSkips": 5033,
+      "seconds": 487.23
+    },
+    "native": {
+      "passed": 983,
+      "skipped": 0
+    },
+    "fullFluidOutputValidations": 5,
+    "nativeClient": {
+      "passed": 11,
+      "browserGatedSkips": 15,
+      "seconds": 6.71
+    },
+    "packedChecks": {
+      "passed": 8,
+      "seconds": 81.03
+    }
+  },
+  "limits": [
+    "React projection listener amplification and retained synthetic event ancestry remain unresolved. Separate strict regression fixtures are not included in this change.",
+    "Full SDK/Looma release qualification and publication remain pending.",
+    "The full native C# renderer objective remains unfinished."
+  ]
+}

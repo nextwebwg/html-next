@@ -8,7 +8,8 @@ import { compileScript, parse as parseVue } from "@vue/compiler-sfc";
 import { build } from "esbuild";
 import { chromium, firefox, webkit, type Browser, type BrowserType, type Page } from "playwright";
 
-import { generateComponent as generateCompiled, vueHostArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { GENERATOR_VERSION, generateComponent as generateCompiled, vueHostArtifact, vueControlArtifact, vuePropsArtifact } from "../src/generate.js";
+import { attributeHelperArtifact } from "../src/targets/attribute-helper.js";
 import { liveReference } from "./live-reference.js";
 import { parseComponent } from "../src/source-parser.js";
 
@@ -371,6 +372,7 @@ describe.skipIf(!enabled)("generated target runtime parity", () => {
       vueHostArtifact(),
       vueControlArtifact(),
       vuePropsArtifact(),
+      attributeHelperArtifact("vue", GENERATOR_VERSION),
     ].map((artifact) => [artifact.path, artifact.content]));
     for (const [path, content] of artifacts) {
       const parent = path.split("/").slice(0, -1).join("/");
@@ -510,8 +512,8 @@ createApp({ render: () => h("div", [h(DemoCounter, { id: "counter", onCountChang
           invalid: true,
           optionalTitle: "",
           ownTitle: false,
-          // Both targets record explicit props as data-<tag>-prop-<name> for the rendered form.
-          panel: { ownAlign: false, dataAlign: "end", dataLabel: "Ready", className: "base consumer", role: "region" },
+          // Both targets consume props and apply caller attributes before the authored root values.
+          panel: { ownAlign: false, dataAlign: "end", dataLabel: "Ready", className: "base", role: "group" },
           // The vanilla build stamps its root's provenance; Vue scopes styles its own way and need not.
           provenance: target === "vanilla" ? "demo-counter" : null,
         });
@@ -553,7 +555,7 @@ describe.skipIf(!enabled)("framework-native reactive conversion", () => {
       computedFixtureUrl.href,
     );
     const artifacts = new Map(
-      [...generateComponent(definition), vueHostArtifact(), vuePropsArtifact()].map((artifact) => [artifact.path, artifact.content]),
+      [...generateComponent(definition), vueHostArtifact(), vuePropsArtifact(), attributeHelperArtifact("vue", GENERATOR_VERSION)].map((artifact) => [artifact.path, artifact.content]),
     );
     for (const [path, content] of artifacts) {
       const parent = path.split("/").slice(0, -1).join("/");
@@ -3106,6 +3108,8 @@ describe.skipIf(!enabled)("polymorphic roots in generated targets", () => {
     await writeFile(join(directory, host.path), host.content);
     const props = vuePropsArtifact();
     await writeFile(join(directory, props.path), props.content);
+    const attributes = attributeHelperArtifact("vue", GENERATOR_VERSION);
+    await writeFile(join(directory, attributes.path), attributes.content);
     const parsed = parseVue(await readFile(join(directory, "vue/XAction.vue"), "utf8"), { filename: "XAction.vue" });
     assert.deepEqual(parsed.errors, []);
     await writeFile(join(directory, "vue/XAction.ts"), compileScript(parsed.descriptor, { id: "x-action", inlineTemplate: true }).content);

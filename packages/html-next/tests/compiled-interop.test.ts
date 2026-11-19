@@ -15,6 +15,7 @@ const fixtures = new URL("./fixtures/direct-extend/", import.meta.url);
 
 interface Runtime {
   readonly factory: (options?: Record<string, unknown>) => Element;
+  setInvocationAttributes(element: Element, attributes: Readonly<Record<string, unknown>>): void;
   getComponentHost(element: Element): { state: Record<string, any> } | undefined;
   inspectInstance(element: Element): unknown;
   serializeRenderedForm(container: Element): string;
@@ -29,7 +30,8 @@ async function load(definition: ComponentDefinition): Promise<{ runtime: Runtime
     .find((artifact) => artifact.path.endsWith(".js"))!.content;
   assert.doesNotMatch(module, /@nextwebwg\/html-next\/runtime/, "the component compiles directly");
   const entry = `${module}
-export { getComponentHost, inspectInstance, serializeRenderedForm, registerComponentDefinitions, lowerDocument, componentRegistry } from "@nextwebwg/html-next/runtime";`;
+export { getComponentHost, inspectInstance, serializeRenderedForm, registerComponentDefinitions, lowerDocument, componentRegistry } from "@nextwebwg/html-next/runtime";
+export { setInvocationAttributes } from "@nextwebwg/html-next/generated-runtime";`;
   const result = await build({
     stdin: { contents: entry, loader: "js", resolveDir: fileURLToPath(fixtures) },
     bundle: true, format: "esm", write: false, platform: "browser", target: ["es2022"],
@@ -65,6 +67,44 @@ describe("compiled roots in the live runtime's inspection and serialization", as
   const text = await readFile(new URL("parity.html", fixtures), "utf8");
   const definition = parseComponent(text, new URL("parity.html", fixtures).href);
   const rows = [1, 2, 3].map((id) => ({ id, label: `r${id}`, tags: id === 2 ? ["t"] : [] }));
+
+  it("replays replacement HTML inputs at authored destinations without assigning props", async () => {
+    for (const [markup, title, destination, manual] of [
+      ['<button $attributes title="Template">Before</button>', 'Template', 'button', true],
+      ['<button title="Template" $attributes>After</button>', 'Updated', 'button', true],
+      ['<section><button $attributes>Inner</button></section>', 'Updated', 'button', true],
+      ['<button>None</button>', null, 'button', true],
+      ['<button>Automatic</button>', 'Updated', 'button', false],
+      ['<button title="Template">Automatic first</button>', 'Template', 'button', false],
+    ] as const) {
+      const definition = parseComponent(`<template component="x-input"${manual ? " noforward" : ""}>${markup}</template>`, "file:///input.html");
+      const { runtime, document } = await load(definition);
+      const root = runtime.factory({ attributes: { title: "Caller", "data-old": "Old" } });
+      document.body.append(root);
+      root.setAttribute("data-page", "Page");
+      runtime.setInvocationAttributes(root, { title: "Updated", "data-next": "Next" });
+      await flush();
+      const target = root.matches(destination) ? root : root.querySelector(destination)!;
+      assert.equal(target.getAttribute("title"), title);
+      assert.equal(target.getAttribute("data-old"), null);
+      assert.equal(root.getAttribute("data-page"), "Page");
+      if (root !== target) assert.equal(root.getAttribute("title"), null);
+      runtime.setInvocationAttributes(root, {});
+      await flush();
+      assert.equal(target.getAttribute("title"), markup.includes('title="Template"') ? "Template" : null);
+      assert.equal(target.getAttribute("data-next"), null);
+    }
+    const definition = parseComponent(`<template component="x-input"><defs><prop name="labelText" type="string">Label.</prop></defs><button $attributes>{$labelText}</button></template>`, "file:///prop-input.html");
+    const { runtime, document } = await load(definition);
+    const root = runtime.factory({ labelText: "Caller" });
+    document.body.append(root);
+    runtime.setInvocationAttributes(root, { "label-text": "Alias", labelText: "Prop", title: "Updated" });
+    await flush();
+    assert.equal(root.textContent, "Caller");
+    assert.equal(root.getAttribute("label-text"), null);
+    assert.equal(root.getAttribute("labeltext"), null);
+    assert.equal(root.getAttribute("title"), "Updated");
+  });
 
   it("returns the compiled host and inspects its state", async () => {
     const { runtime, document } = await load(definition);
@@ -191,17 +231,19 @@ describe("compiled roots in the live runtime's inspection and serialization", as
     assert.equal(adopted.outerHTML, element.outerHTML);
   });
 
-  it("keeps a root's consumer attributes, merged with its literals, through live hydration", async () => {
+  it("keeps explicitly forwarded attributes through live hydration", async () => {
     const card = parseComponent(`<template component="x-plain" status="early" summary="Plain.">
       <defs><state name="n" type="integer" value="1"></state></defs>
-      <section class="card own" style="color: red" title="own"><b>{$n}</b></section></template>`, "file:///plain.html");
+      <section class="card own" style="color: red" title="own" $attributes><b>{$n}</b></section></template>`, "file:///plain.html");
     const { runtime, document } = await load(card);
     const element = runtime.factory({ attributes: { class: "mine", style: "margin: 1px", title: "theirs" } });
     const container = document.createElement("main");
     container.append(element);
     document.body.append(container);
     await flush();
-    assert.equal(element.getAttribute("class"), "card own mine");
+    assert.equal(element.getAttribute("class"), "mine");
+    assert.equal(element.getAttribute("style"), "margin: 1px");
+    assert.equal(element.getAttribute("title"), "theirs");
     const server = document.createElement("main");
     server.innerHTML = runtime.serializeRenderedForm(container);
     document.body.append(server);

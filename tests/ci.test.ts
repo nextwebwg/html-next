@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,29 +9,61 @@ import { describe, expect, it } from "vitest";
 import { affectedPackages, createPlan, isReleaseMetadataChange } from "../scripts/ci-plan.js";
 
 describe("affected CI", () => {
+  it("selects native checks without trying to pack .NET as an npm package", () => {
+    const plan = createPlan(["packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs"]);
+    expect(plan.dotnet).toBe(true);
+    expect(plan.packages).toEqual([]);
+    expect(plan.node).toEqual([]);
+    expect(plan.browser).toEqual([]);
+    expect(createPlan(["packages/html-next-dotnet/README.md"]).dotnet).toBe(false);
+    expect(createPlan(["packages/html-next/README.md"]).dotnet).toBe(false);
+    expect(createPlan(["scripts/ci-plan.ts"]).dotnet).toBe(true);
+  });
+  it("requires selected native checks to succeed and permits only unselected native checks to skip", () => {
+    const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+    const guard = /node --input-type=module <<'JS'\n([\s\S]*?)\n\s+JS/.exec(workflow)?.[1];
+    expect(guard).toBeDefined();
+    for (const [selected, result, status] of [[true, "success", 0], [true, "failure", 1], [true, "skipped", 1], [false, "skipped", 0]] as const) {
+      const results = {
+        changes: { result: "success", outputs: { dotnet: String(selected), packages: "[]", has_node: "false", has_browser: "false", has_packages: "false", converters: "false" } },
+        repository: { result: "success" }, dotnet: { result },
+        ...Object.fromEntries(["verify", "browser", "packages", "converters"].map(name => [name, { result: "skipped" }])),
+      };
+      expect(spawnSync(process.execPath, ["--input-type=module", "-e", guard!], {
+        env: { ...process.env, RESULTS: JSON.stringify(results) },
+      }).status).toBe(status);
+    }
+  });
+  it("runs the native client integration on compiler or manifest changes in the .NET job", () => {
+    const file = "packages/html-next-unplugin/tests/dotnet-hydration.test.ts";
+    for (const changed of ["packages/html-next-unplugin/src/index.ts", "packages/html-next/src/client-plan.ts", file]) {
+      const plan = createPlan([changed]);
+      expect(plan.dotnet).toBe(true);
+      expect([...plan.browser, ...plan.node].some(job => job.files.includes(file))).toBe(false);
+    }
+  });
   it("builds a packed consumer together with its workspace dependencies", () => {
     const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
     const selector = /pnpm --filter '([^']+)' build/.exec(workflow)?.[1];
     expect(selector).toBeDefined();
     const selected = JSON.parse(execFileSync("corepack", ["pnpm", "--filter",
-      selector!.replace("${{ matrix.package }}", "htmlkit"), "list", "--depth", "-1", "--json"], {
+      selector!.replace("${{ matrix.package }}", "html-next-unplugin"), "list", "--depth", "-1", "--json"], {
       cwd: fileURLToPath(new URL("../", import.meta.url)), encoding: "utf8", shell: process.platform === "win32",
     })) as { name: string }[];
-    expect(selected.map(({ name }) => name).sort()).toEqual(["@nextwebwg/html-next", "@nextwebwg/htmlkit"]);
+    expect(selected.map(({ name }) => name).sort()).toEqual(["@nextwebwg/html-next", "@nextwebwg/html-next-converter", "@nextwebwg/html-next-unplugin"]);
   });
 
-  it("keeps an HTMLKit fix out of compiler and framework tests", () => {
-    expect(affectedPackages(["packages/htmlkit/src/routes.ts"])).toEqual(["htmlkit"]);
-    const plan = createPlan(["packages/htmlkit/src/routes.ts"]);
-    expect(plan.node.every((job) => job.package === "htmlkit")).toBe(true);
-    expect(plan.browser.every((job) => job.files.every((file) => file.startsWith("packages/htmlkit/")))).toBe(true);
-    expect(plan.packages).toEqual(["htmlkit"]);
-    expect(plan.browser.filter((job) => job.files.includes("packages/htmlkit/tests/client-navigation.test.ts"))).toHaveLength(3);
+  it("keeps a bundler adapter fix out of compiler tests", () => {
+    expect(affectedPackages(["packages/html-next-unplugin/src/index.ts"])).toEqual(["html-next-unplugin"]);
+    const plan = createPlan(["packages/html-next-unplugin/src/index.ts"]);
+    expect(plan.node.every((job) => job.package === "html-next-unplugin")).toBe(true);
+    expect(plan.browser.every((job) => job.files.every((file) => file.startsWith("packages/html-next-unplugin/")))).toBe(true);
+    expect(plan.packages).toEqual(["html-next-unplugin"]);
   });
 
   it("follows transitive workspace consumers", () => {
     expect(affectedPackages(["packages/html-next/src/reactivity.ts"])).toEqual([
-      "html-next", "html-next-converter", "html-next-unplugin", "htmlkit",
+      "html-next", "html-next-converter", "html-next-unplugin",
     ]);
     expect(affectedPackages(["packages/html-next-converter/src/vue.ts"])).toEqual([
       "html-next-converter", "html-next-unplugin",
@@ -40,29 +72,29 @@ describe("affected CI", () => {
   });
 
   it("skips documentation and includes shared build inputs and removed package files", () => {
-    expect(affectedPackages(["README.md", "CHANGELOG.md", "docs/architecture.md", "packages/htmlkit/docs/client-navigation.md"])).toEqual([]);
+    expect(affectedPackages(["README.md", "CHANGELOG.md", "docs/architecture.md", "packages/html-next-unplugin/docs/usage.md"])).toEqual([]);
     expect(affectedPackages(["packages/html-next-converter/src/deleted.ts"])).toEqual(["html-next-converter", "html-next-unplugin"]);
-    expect(affectedPackages(["pnpm-lock.yaml"])).toHaveLength(4);
-    // Guide examples are executable fixtures in target-transitions and HTMLKit.
-    expect(affectedPackages(["docs/guide/transitions.md"])).toHaveLength(4);
+    expect(affectedPackages(["pnpm-lock.yaml"])).toHaveLength(3);
+    // Guide examples are executable fixtures in target-transitions.
+    expect(affectedPackages(["docs/guide/transitions.md"])).toHaveLength(3);
     expect(createPlan(["docs/guide/transitions.md"]).browser.flatMap((job) => job.files))
       .toContain("packages/html-next/tests/target-transitions.test.ts");
-    expect(affectedPackages(["vitest.browser.config.ts"])).toHaveLength(4);
-    expect(affectedPackages(["scripts/ci-plan.ts"])).toHaveLength(4);
+    expect(affectedPackages(["vitest.browser.config.ts"])).toHaveLength(3);
+    expect(affectedPackages(["scripts/ci-plan.ts"])).toHaveLength(3);
   });
 
   it("keeps a lockstep version bump from widening a package fix", () => {
     const previous = "1.0.0-alpha.41", next = "1.0.0-alpha.42";
-    const manifests = ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit"];
+    const manifests = ["html-next", "html-next-converter", "html-next-unplugin"];
     const changes = manifests.map((name) => ({ path: `packages/${name}/package.json`,
       before: JSON.stringify({ name, version: previous }), after: JSON.stringify({ name, version: next }) }));
     changes.push({ path: "packages/html-next/src/generate.ts", before: `export const GENERATOR_VERSION = "${previous}";`,
       after: `export const GENERATOR_VERSION = "${next}";` });
     changes.push({ path: "packages/html-next/examples/generated/vanilla/XButton.js", before: `// Generated by ${previous}`,
       after: `// Generated by ${next}` });
-    changes.push({ path: "packages/htmlkit/src/routes.ts", before: "before", after: "after" });
+    changes.push({ path: "packages/html-next-unplugin/src/index.ts", before: "before", after: "after" });
     const functional = changes.filter(({ path, before, after }) => !isReleaseMetadataChange(path, before, after, previous, next));
-    expect(createPlan(functional.map(({ path }) => path)).packages).toEqual(["htmlkit"]);
+    expect(createPlan(functional.map(({ path }) => path)).packages).toEqual(["html-next-unplugin"]);
   });
 
   it("selects functional edits beside a release version change", () => {
@@ -76,7 +108,7 @@ describe("affected CI", () => {
     expect(isReleaseMetadataChange("packages/html-next/src/runtime.ts", previous, next, previous, next)).toBe(false);
   });
 
-  it("checks all published consumers while selecting only an HTMLKit release's functional tests", () => {
+  it("checks all published consumers while selecting only a bundler adapter release's functional tests", () => {
     const directory = mkdtempSync(join(tmpdir(), "html-next-release-ci-"));
     const output = join(directory, "outputs");
     const git = (...args: string[]) => execFileSync("git", args, { cwd: directory, encoding: "utf8", stdio: "pipe" });
@@ -86,30 +118,30 @@ describe("affected CI", () => {
       cpSync(fileURLToPath(new URL("../scripts/ci-plan.ts", import.meta.url)), join(directory, "scripts/ci-plan.ts"));
       write("tests/target-durations.json", "{}");
       write("pnpm-lock.yaml", "playwright:\n  specifier: 1.63.0\n  version: 1.63.0\n");
-      for (const name of ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit"]) {
+      for (const name of ["html-next", "html-next-converter", "html-next-unplugin"]) {
         mkdirSync(join(directory, `packages/${name}/tests`), { recursive: true });
         const manifest = JSON.parse(readFileSync(fileURLToPath(new URL(`../packages/${name}/package.json`, import.meta.url)), "utf8"));
         manifest.version = "1.0.0-alpha.41";
         write(`packages/${name}/package.json`, JSON.stringify(manifest));
       }
-      mkdirSync(join(directory, "packages/html-next/src")); mkdirSync(join(directory, "packages/htmlkit/src"));
+      mkdirSync(join(directory, "packages/html-next/src")); mkdirSync(join(directory, "packages/html-next-unplugin/src"));
       write("packages/html-next/src/generate.ts", 'export const GENERATOR_VERSION = "1.0.0-alpha.41";');
-      write("packages/htmlkit/src/routes.ts", "before"); write("packages/htmlkit/tests/routes.test.ts", "// Node regression");
+      write("packages/html-next-unplugin/src/index.ts", "before"); write("packages/html-next-unplugin/tests/routes.test.ts", "// Node regression");
       git("init", "--quiet"); git("add", ".");
       const commit = () => git("-c", "user.name=CI", "-c", "user.email=ci@example.test", "-c", "core.hooksPath=/dev/null", "commit", "--quiet", "-m", "fixture");
       commit(); const base = git("rev-parse", "HEAD").trim();
-      for (const name of ["html-next", "html-next-converter", "html-next-unplugin", "htmlkit"]) {
+      for (const name of ["html-next", "html-next-converter", "html-next-unplugin"]) {
         write(`packages/${name}/package.json`, readFileSync(join(directory, `packages/${name}/package.json`), "utf8").replace("alpha.41", "alpha.42"));
       }
       write("packages/html-next/src/generate.ts", 'export const GENERATOR_VERSION = "1.0.0-alpha.42";');
-      write("packages/htmlkit/src/routes.ts", "after"); git("add", "."); commit();
+      write("packages/html-next-unplugin/src/index.ts", "after"); git("add", "."); commit();
       execFileSync(process.execPath, [join(directory, "scripts/ci-plan.ts")], { env: { ...process.env, CI_BASE: base, GITHUB_OUTPUT: output } });
       const values = Object.fromEntries(readFileSync(output, "utf8").trim().split("\n")
         .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
-      expect(JSON.parse(values.node!).include.map((job: { package: string }) => job.package)).toEqual(["htmlkit"]);
-      expect(JSON.parse(values.packages!)).toEqual(["html-next", "html-next-unplugin", "htmlkit"]);
+      expect(JSON.parse(values.node!).include.map((job: { package: string }) => job.package)).toEqual(["html-next-unplugin"]);
+      expect(JSON.parse(values.packages!)).toEqual(["html-next", "html-next-unplugin"]);
       expect(values.generated).toBe("true"); expect(values.has_packages).toBe("true");
-      expect(values.converters).toBe("false");
+      expect(values.converters).toBe("true");
       // A developer's new file is not in HEAD yet, but must select its owning suite.
       write("packages/html-next/tests/new-regression.test.ts", "// New local regression");
       const localOutput = join(directory, "local-outputs");
@@ -132,7 +164,7 @@ describe("affected CI", () => {
     expect(plan.corpus).toHaveLength(18);
     expect(plan.corpus.every((job) => job.files.every((file) => file.endsWith("public-conformance-parity.test.ts")))).toBe(true);
     expect(plan.corpus.every((job) => job.seconds <= 180)).toBe(true);
-    expect(createPlan(["packages/htmlkit/src/routes.ts"]).corpus).toEqual([]);
+    expect(createPlan(["packages/html-next-unplugin/src/index.ts"]).corpus).toEqual([]);
     expect(files.has("packages/html-next-unplugin/tests/framework.test.ts")).toBe(true);
     expect(plan.browser.every((job) => job.seconds <= 180)).toBe(true);
     const runtime = plan.browser.filter((job) => job.files.includes("packages/html-next/tests/runtime.test.ts"));

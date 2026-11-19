@@ -48,7 +48,8 @@ describe("generated DOM helpers", () => {
     const holder = document.createElement("div");
     holder.append(node);
     assert.equal(holder.innerHTML,
-      '<p class="a" data-x="<b>">text<!--html-next:start--><!--html-next:end--><i></i><!--html-next:each-start--><!--html-next:each-end--></p>');
+      '<p class="a" data-x="&lt;b&gt;">text<!--html-next:start--><!--html-next:end--><i></i><!--html-next:each-start--><!--html-next:each-end--></p>');
+    assert.equal((holder.firstChild as Element).getAttribute("data-x"), "<b>");
     assert.equal(holder.firstChild!.childNodes[1]!.nodeType, 3);
   });
 

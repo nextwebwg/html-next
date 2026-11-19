@@ -1,3 +1,6 @@
+import { ownedEntryIndex } from "./entry-origin.js";
+import { isUrlAttribute } from "./sanitize.js";
+import { forwardedAttributes } from "./dom-attributes.js";
 export { activateModule } from "./module-connection.js";
 export { generatedInputs, awaitInput, bindInput } from "./generated-inputs.js";
 export { stateInitializers } from "./generated-state.js";
@@ -6,17 +9,20 @@ export { evaluateInput, inputRead, inputDefault, requireInputStatus, READY_INPUT
 /** Native lifecycle and prop wiring shared by ahead-of-time generated components. */
 
 import { fail } from "./diagnostics.js";
+import { COMPONENT_LIFECYCLE_SELECTOR } from "./component-identity.js";
 import { recordInputs, restoreInstance } from "./generated-hydration.js";
 import { checkProps, registerEntry, registryRecord } from "./component-registry.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { documentState, lifecycleKey, type RuntimeElement } from "./generated-lifecycle.js";
 import { ABSENT, NONCONFORMING, toAttribute, toText, truthy, type Value } from "./expression.js";
 import { isNativeEvent, isPlatformObject } from "./freeze.js";
-import { NESTED, raw, RAW } from "./keyed.js";
+import { dispose, NESTED, raw, RAW } from "./keyed.js";
 import { applyBoundControlValue, controlValue, holdControl } from "./controls.js";
 import { initialAt } from "./state-initial.js";
 import { markProjectedRoot, stateAttributeValue } from "./component-styles.js";
-import { currentProjection, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, switchFallback } from "./rendered-form.js";
+import {
+  ProjectionClaims, awaitContent, borrowedContent, borrowedRanges, currentProjection, releaseContent, projectionRejected, rejectProjection, renderedCallerProps, renderedFormMark, serverMark, serverRanges, slotRegions, slotRegionsEmpty, switchFallback, withRegionContent, writeMark,
+} from "./rendered-form.js";
 import type { RenderedInstanceRecord } from "./rendered-form.js";
 import { sameInputStatus, READY_INPUT, UNRESOLVED_INPUT, type ComponentInputs, type InputStatus } from "./inputs.js";
 import { regionEnd, renderedInstanceRecord } from "./generated-hydration.js";
@@ -37,7 +43,7 @@ import { typedText, type TextForm, type TypeCheck } from "./type-checks.js";
 import { ask, hostListener, responderCheck, type RequestChecks, type RequestOptions } from "./requests.js";
 import { headInstance, instanceScripts, type DeclaredScript, type HeadEntry, type ScriptStatus } from "./head.js";
 import { DataResource, type DataState } from "./data.js";
-import { propAttribute } from "./names.js";
+import { asciiLowerCase, kebabCase, propAttribute } from "./names.js";
 import { propsValidity, type PropRule, type Validity } from "./validate.js";
 import type { boundFailures } from "./value-constraints.js";
 import { manageDerivedValidity, setElementValidity, unmanageElementValidity, validityState } from "./validity.js";
@@ -211,10 +217,13 @@ export function invoke(
   instance: GeneratedInstance, factory: GeneratedFactory, placeholder: ChildNode, options: object,
   html: Readonly<Record<string, string>>, follow: (root: Element, previous: Element) => void, stops: (() => void)[],
 ): GeneratedInstance {
+  // A component whose module was evaluated again creates through its latest factory.
+  if (replacedFactories !== undefined) while (replacedFactories.has(factory)) factory = replacedFactories.get(factory)!;
   const root = factory(options, html);
   // A placeholder that is its block's own node has no parent yet; the block takes the root instead.
   if (placeholder.parentNode !== null) placeholder.replaceWith(root);
   // A projected invocation's projection entry follows its root, so a slot that renders again inserts it.
+  if (placeholder.nodeType === 1) invocationSlots.set(root, invocationSlots.get(placeholder) ?? (placeholder as Element).getAttribute("slot") ?? "");
   follows(placeholder, root);
   const child = (root as RuntimeElement)[lifecycleKey]!.h as GeneratedInstance;
   let current = root;
@@ -258,7 +267,7 @@ const regionSlots = new WeakMap<Node, readonly [slot: string, end: Node]>();
  * bundle it; without it a slot places its projected nodes as they are.
  */
 let regionFill: ((assigned: readonly Node[], fallback: boolean) =>
-  { readonly nodes: Node[]; readonly empty: boolean; readonly at?: (open: Node) => ChildNode }) | undefined;
+  { readonly nodes: Node[]; readonly empty: boolean; readonly at?: (open: Node, stops?: (() => void)[]) => ChildNode }) | undefined;
 
 /** Records that the region from `start` to `end` is for an element with `slot`; returns `start`. */
 export function slotRegion<T extends Node>(start: T, end: Node, slot: string): T {
@@ -267,14 +276,15 @@ export function slotRegion<T extends Node>(start: T, end: Node, slot: string): T
     const nodes = currentProjection(assigned);
     const regions = fallback ? slotRegions(assigned) : undefined;
     if (regions === undefined) return { nodes, empty: false };
-    const empty = (): boolean => regions.every(([first, last]) => first.nextSibling === last);
-    return { nodes, empty: empty(), at: (open) => {
+    const empty = (): boolean => slotRegionsEmpty(regions);
+    return { nodes, empty: empty(), at: (open, stops) => {
       // The fallback block is placed through this node's `before`, which hands its nodes to the switch.
       const at = open.ownerDocument!.createComment("");
       at.before = (...given) => {
         const fallback = (given as Node[]).flatMap((node) => node.nodeType === 11 ? Array.from(node.childNodes) : [node]);
         if (empty()) (regions[0]![0] as ChildNode).before(...fallback);
-        switchFallback(open, regions, fallback);
+        const stop = switchFallback(open, regions, fallback);
+        stops?.push(stop);
       };
       return at;
     } };
@@ -292,9 +302,9 @@ export function projected(fragment: Node): { children: Node[]; slots: Record<str
   let region: readonly [string, Node] | undefined;
   for (const node of Array.from(fragment.childNodes)) {
     region ??= regionSlots.get(node);
-    const name = region?.[0] ?? (node.nodeType === 1 ? (node as Element).getAttribute("slot") : null);
+    const name = region?.[0] ?? invocationSlots.get(node) ?? (node.nodeType === 1 ? (node as Element).getAttribute("slot") : null);
     if (node === region?.[1]) region = undefined;
-    if (name === null) children.push(node);
+    if (name === null || name === "") children.push(node);
     else (slots[name] ??= []).push(node);
   }
   return { children, slots };
@@ -418,7 +428,9 @@ export function readContext(
   instance.o.push({
     pause: () => { provider?.R?.delete(follow); },
     resume: () => {
-      search: for (let element = instance.e.parentElement; provider === undefined && element !== null; element = element.parentElement) {
+      // Content a `<slot of>` outlet placed has the slot's owner as its logical parent (components#component-ancestry-for-shared-state).
+      const up = (element: Element): Element | null => placedOwner?.(element) ?? element.parentElement;
+      search: for (let element = up(instance.e); provider === undefined && element !== null; element = up(element)) {
         const owner = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
         for (const candidate of owner === undefined ? [] : [owner, ...owner.D ?? []]) {
           const position = candidate.S.n.indexOf(name);
@@ -596,6 +608,13 @@ export function manageData(
 /** A compiled root's prop channel, which `componentRegistry.update` finds. */
 const generatedChannel = (element: Element) => generatedPropUpdaters.get(element);
 
+/** Each factory a changed module's evaluation replaced, with the factory that replaced it. */
+let replacedFactories: WeakMap<GeneratedFactory, GeneratedFactory> | undefined;
+/** What each factory's template writes on its root, by arm, where its module records it. */
+const factoryRoots = new WeakMap<GeneratedFactory, readonly ArmRoot[]>();
+/** The handles a replaced instance's parent can still hold, by the handle that now answers for them. */
+const forwarded = new WeakMap<GeneratedInstance, GeneratedInstance[]>();
+
 /**
  * Defines a compiled component in the document's `componentRegistry` when its module is evaluated,
  * so `create` makes it: `content` goes to the slot each node's `slot` attribute names, or the default.
@@ -622,6 +641,112 @@ export function defineComponent(
     k: factory,
   }, true);
   registryRecord(document).i.add(generatedChannel);
+}
+
+/**
+ * `defineComponent` for a module a development server evaluates again (`GenerationOptions.hot`): a
+ * new factory replaces the registered one, and its connected instances re-render (`replaceInstances`).
+ * `roots` is what the template writes on its root, by `$match` arm.
+ */
+export function replaceComponent(tag: string, factory: GeneratedFactory, props: readonly string[], roots?: readonly ArmRoot[]): void {
+  if (typeof document === "undefined") return;
+  const existing = registryRecord(document).d.get(tag)?.k;
+  if (roots !== undefined) factoryRoots.set(factory, roots);
+  defineComponent(tag, factory, props);
+  if (typeof existing === "function" && existing !== factory) replaceInstances(tag, existing as GeneratedFactory, factory, props);
+}
+
+/**
+ * Rebuilds each connected instance of `tag` with `next`: it disconnects, the new factory builds its
+ * root from its prop inputs, the attributes it received from outside its template and its projected
+ * nodes, and the new root takes the old one's place and connects. A state the new factory declares
+ * under the same name keeps its value when that value has the declared type. A parent keeps the old
+ * handle, which from then on answers with the new root and prop channel.
+ */
+function replaceInstances(tag: string, previous: GeneratedFactory, next: GeneratedFactory, props: readonly string[]): void {
+  (replacedFactories ??= new WeakMap()).set(previous, next);
+  const roots = factoryRoots.get(previous);
+  for (const element of Array.from(document.querySelectorAll(COMPONENT_LIFECYCLE_SELECTOR))) {
+    const record = (element as RuntimeElement)[lifecycleKey];
+    const old = record?.h as GeneratedInstance | undefined;
+    // ponytail: the component that owns its root rebuilds; one it delegates its root to keeps its definition.
+    if (old?.S.g !== tag || old.e !== element || !element.isConnected || record!.disconnect === undefined) continue;
+    const arm = roots?.find((candidate) => candidate[0] === element.localName);
+    const empty: ArmRoot = [element.localName, {}, [], "", [], []];
+    let carried = arm === undefined ? element : armElement(element, arm, empty);
+    const attributes: Record<string, unknown> = Object.assign(Object.create(null), old.F?.values);
+    if (old.F !== undefined) {
+      const inputs: Record<string, string> = Object.fromEntries(Object.entries(attributes).flatMap(([name, value]) => {
+        const text = toAttribute(value as Value, name);
+        return text === null ? [] : [[name, text]];
+      }));
+      carried = armElement(carried, [element.localName, inputs, (inputs.class ?? "").split(/\s+/), inputs.style ?? "", [], []], empty);
+    }
+    const output: Record<string, string> = Object.create(null);
+    for (const { name, value } of carried.attributes) {
+      if (name.startsWith(`data-${tag}-`) || name === "component" || name === "data-component" || name === "data-html-next-instance") continue;
+      if (old.F === undefined) attributes[name] = value; else output[name] = value;
+    }
+    const options: Record<string, unknown> = { attributes, children: [], slots: {} };
+    const html: Record<string, string> = Object.create(null);
+    for (const name of props) {
+      const input = old.B?.i[name];
+      if (input?.present !== true) continue;
+      if (input.source === "html") html[name] = String(input.value);
+      else options[name] = input.value;
+    }
+    for (const [node, slot] of old.J ?? []) {
+      if (slot === "") (options.children as Node[]).push(node);
+      else ((options.slots as Record<string, Node[]>)[slot] ??= []).push(node);
+    }
+    const rendered = renderedHandles(element, old);
+    documentState(document).lifecycle!.remove(element, record!);
+    const root = next(options, html);
+    for (const [name, value] of Object.entries(output)) {
+      const own = name === "class" || name === "style" ? root.getAttribute(name) : null;
+      root.setAttribute(name, own === null || own === "" ? value : own + (name === "class" ? " " : "; ") + value);
+    }
+    const handle = (root as RuntimeElement)[lifecycleKey]!.h as GeneratedInstance;
+    carryState(old, handle);
+    // Each component instance the template renders, at any depth, keeps its state too: the new
+    // template's nth instance of a tag takes the state of the old template's nth instance of it.
+    for (const [name, handles] of renderedHandles(root, handle)) handles.forEach((each, index) => {
+      const from = rendered.get(name)?.[index];
+      if (from !== undefined) carryState(from, each);
+    });
+    element.replaceWith(root);
+    follows(element, root);
+    (element as Element & { [replacedKey]?: unknown })[replacedKey] = handle;
+    const holders = [old, ...forwarded.get(old) ?? []];
+    forwarded.set(handle, holders);
+    for (const holder of holders) {
+      const was = holder.e;
+      (holder as { B?: GeneratedPropRecord | undefined }).B = handle.B;
+      (holder as { F?: GeneratedInstance["F"] }).F = handle.F;
+      holder.e = root;
+      notifyPropertySet(holder, "e", was, root, undefined);
+    }
+  }
+}
+
+/** The handles of the component instances `owner`'s template renders under `root`, at any depth and by tag in tree order; not those projected into it. */
+function renderedHandles(root: Element, owner: GeneratedInstance): Map<string, GeneratedInstance[]> {
+  const rendered = new Map<string, GeneratedInstance[]>();
+  for (const element of Array.from(root.querySelectorAll(COMPONENT_LIFECYCLE_SELECTOR))) {
+    const handle = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+    if (handle?.e !== element || owner.J?.some(([node]) => node.contains(element)) === true) continue;
+    rendered.set(handle.S.g, [...rendered.get(handle.S.g) ?? [], handle]);
+  }
+  return rendered;
+}
+
+/** Gives `to` each writable state value of `from` whose name `to` declares, when the value has its declared type. */
+function carryState(from: GeneratedInstance, to: GeneratedInstance): void {
+  const writable = from.S.k ?? from.S.n.length;
+  for (let index = 0; index < (to.S.k ?? to.S.n.length); index += 1) {
+    const at = from.S.n.indexOf(to.S.n[index]!);
+    if (at >= 0 && at < writable && conforms(from.v![at], to.S.t[index]!)) to.w(index, from.v![at]);
+  }
 }
 
 interface PropInput {
@@ -669,7 +794,7 @@ export function chosen(props: CompiledProps, prop: CompiledProp, values: Readonl
 /** An input through a prop's type (`invocationValue`): null uses its default, and a refused value is undefined. */
 function taken(checks: PropChecks | null, input: unknown, source: "html" | "value", fallback?: unknown): unknown {
   if (input === null) return fallback === undefined ? null : fallback;
-  if (checks === null) return input;
+  if (checks === null) return undefined;
   const parsed = checks.c(input, "$", source);
   return parsed.ok ? parsed.value : undefined;
 }
@@ -732,7 +857,7 @@ export function acceptProps(
   const raw = new Set<string>();
   for (const name of names) {
     const prop = props[name]!;
-    const value = input[name];
+    const value = Object.hasOwn(input, name) ? input[name] : undefined;
     if (value === undefined || value === null || prop.select !== undefined && props[prop.select.from] === undefined) continue;
     raw.add(name);
   }
@@ -745,8 +870,8 @@ export function acceptProps(
     const name = names.find((candidate) => attribute.name === propAttribute(D.g, candidate));
     if (name !== undefined) incoming[name] = { value: attribute.value, source: "html", present: true };
   }
-  for (const name of names) if (input[name] !== undefined) incoming[name] = { value: input[name], source: "value", present: true };
-  const accepted: Record<string, unknown> = {};
+  for (const name of names) if (Object.hasOwn(input, name) && input[name] !== undefined) incoming[name] = { value: input[name], source: "value", present: true };
+  const accepted: Record<string, unknown> = Object.create(null);
   const at = (name: string): number => {
     const index = names.indexOf(name);
     return index < 0 ? n.indexOf(name) : n.length + index;
@@ -913,7 +1038,7 @@ export function manageProps(instance: GeneratedInstance): void {
   const update = (input: Readonly<Record<string, unknown>>, availability?: Readonly<Record<string, InputStatus>>): void => {
     checkProps(names, input, D.g);
     const element = instance.e;
-    const next: Record<string, unknown> = {};
+    const next: Record<string, unknown> = Object.create(null);
     const acceptedNames = new Set<string>();
     for (const name of names) {
       next[name] = v[at(name)];
@@ -976,7 +1101,7 @@ export function manageProps(instance: GeneratedInstance): void {
  * replaces it), 1 is a `$if` anchor pair, 2 is a `$each` anchor pair, 3 is an `$html` range and 4 is
  * a slot's placeholder pair.
  */
-export type TemplateSpec = readonly [tag: string, attributes: readonly string[], ...children: readonly unknown[]];
+export type TemplateSpec = readonly [tag: string, attributes: readonly (string | readonly [namespace: string, name: string])[], ...children: readonly unknown[]];
 type TemplateChild = string | 0 | 1 | 2 | 3 | 4 | TemplateSpec;
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -991,7 +1116,9 @@ export function buildTemplate(spec: TemplateSpec, doc: Document = document, svg?
   const node = spec[0] === "" ? doc.createDocumentFragment() : inSvg ? doc.createElementNS(SVG, spec[0]) : doc.createElement(spec[0]);
   const attributes = spec[1];
   for (let index = 0; index < attributes.length; index += 2) {
-    (node as Element).setAttribute(attributes[index]!, attributes[index + 1]!);
+    const name = attributes[index]!;
+    if (typeof name === "string") (node as Element).setAttribute(name, attributes[index + 1] as string);
+    else (node as Element).setAttributeNS(name[0], name[1], attributes[index + 1] as string);
   }
   for (let index = 2; index < spec.length; index += 1) {
     const child = spec[index] as TemplateChild;
@@ -1030,6 +1157,10 @@ export const readFailing = (object: unknown, key: string): unknown =>
 /** `not`, truthiness, `and`/`or`, `? :` and `default` over evaluated operands that may be nonconforming. */
 export const notValue = (value: unknown): unknown => value === NONCONFORMING ? value : !truthy(value as Value);
 export const truthyValue = (value: unknown): unknown => value === NONCONFORMING ? value : truthy(value as Value);
+/** Equality propagates refused reads without importing numeric and dimensional arithmetic. */
+export const equalValue = (left: unknown, right: unknown, unequal = false): unknown =>
+  left === NONCONFORMING || right === NONCONFORMING ? NONCONFORMING
+    : left === ABSENT || right === ABSENT ? ABSENT : (left === right) !== unequal;
 export const logicValue = (and: boolean, left: unknown, right: unknown): unknown =>
   left === NONCONFORMING ? left : truthy(left as Value) !== and ? !and
     : right === NONCONFORMING ? right : truthy(right as Value);
@@ -1075,10 +1206,6 @@ export function shapeItems(
   return result;
 }
 
-/** A row's `loop` record, made afresh for each read as live makes one per update. */
-export const loopRecord = (row: { j?: number; l?: number }): Record<string, unknown> =>
-  ({ index: row.j, first: row.j === 0, last: row.j === row.l! - 1, count: row.l });
-
 /** Flags a row whose binding converts a list or object (see `KeyedRow.w`); returns the value. */
 export const trackContainer = (row: { w?: number }, value: unknown): unknown => {
   if (value !== null && typeof value === "object") row.w = 1;
@@ -1104,6 +1231,8 @@ export function writeUrlAttribute(element: Element, name: string, value: string 
   if (value === null || hasExecutableUrl(value)) element.removeAttribute(name);
   else element.setAttribute(name, value);
 }
+
+export { applyNamespacedAttributes, namespacedAttributeProps, writeNamespacedAttribute, writeNamespacedUrlAttribute, type NamespacedAttribute } from "./dom-attributes.js";
 
 /** A two-way binding's value into its control; an element that is not one gets the attribute. */
 export function writeControl(element: Element, name: string, value: unknown): void {
@@ -1346,6 +1475,7 @@ export interface GeneratedChannel {
 
 /** The instance internals generated handlers, listeners and refs use; each is imported only when used. */
 export interface GeneratedInstance {
+  readonly F?: { readonly values: Record<string, unknown>; readonly draw: () => void };
   /** Creation depth, retained only by graphs with recursive invocation edges. */
   readonly nd?: number;
   readonly U?: GeneratedStateInitializers;
@@ -1392,8 +1522,129 @@ export interface GeneratedInstance {
 /** Each projected node and the name of the slot it is for (`""` for the unnamed slot). */
 export type Projection = readonly [node: Node, slot: string][];
 
+type PlainFrame = { readonly instance: GeneratedInstance; claims?: ProjectionClaims; readonly deferred: boolean; readonly names?: ReadonlySet<string> };
+const plainFrames = /* @__PURE__ */ new WeakMap<Projection, PlainFrame>();
+let pendingPlainTag: string | undefined;
+type PlainPatch = (changed: number, dirty: Map<unknown, 1 | 2>) => void;
+type PlainBlock = { readonly n: Node; z?: (() => void)[] };
+type PlainSetup = (record: { z?: (() => void)[] }, make: (dirty: Map<unknown, 1 | 2>, at?: ChildNode) => PlainBlock,
+  patch: (block: never, changed: number, dirty: Map<unknown, 1 | 2>) => void) => PlainPatch;
+let plainFill: ((adopt: boolean, start: ChildNode, end: ChildNode, name: string, projected: Projection,
+  fallback: boolean, dirty: Map<unknown, 1 | 2>) => PlainSetup | undefined) | undefined;
+
+/** Shares only the repeated ordinary slots selected by the compiler. Accepted projections share all plain slots. */
+export function sharePlainSlots(instance: object, projected: Projection, names: readonly string[]): void {
+  installPlainSlots();
+  if (!plainFrames.has(projected)) plainFrames.set(projected, { instance: instance as GeneratedInstance, deferred: false, names: new Set(names) });
+}
+
+/** Creates an accepted child's projection frame without enrolling ordinary component children. */
+export function invokeAccepted(...args: [...Parameters<typeof invoke>, tag: string]): GeneratedInstance {
+  installPlainSlots();
+  const [instance, factory, site, options, html, follow, stops, tag] = args;
+  const previous = pendingPlainTag;
+  pendingPlainTag = tag;
+  try { return invoke(instance, factory, site, options, html, follow, stops); } finally { pendingPlainTag = previous; }
+}
+export function adoptAcceptedInvoke(...args: [...Parameters<typeof adoptInvoke>, tag: string]): GeneratedInstance {
+  installPlainSlots();
+  const [instance, factory, site, options, html, follow, stops, tag] = args;
+  const previous = pendingPlainTag;
+  pendingPlainTag = tag;
+  try { return adoptInvoke(instance, factory, site, options, html, follow, stops); } finally { pendingPlainTag = previous; }
+}
+export function invokeAcceptedNested(...args: Parameters<typeof invokeAccepted>): GeneratedInstance {
+  const previous = componentCreationDepth;
+  componentCreationDepth = Math.max(previous, args[0].nd ?? 0);
+  try { return invokeAccepted(...args); } finally { componentCreationDepth = previous; }
+}
+export function adoptAcceptedNestedInvoke(...args: Parameters<typeof adoptAcceptedInvoke>): GeneratedInstance {
+  const previous = componentCreationDepth;
+  componentCreationDepth = Math.max(previous, args[0].nd ?? 0);
+  try { return adoptAcceptedInvoke(...args); } finally { componentCreationDepth = previous; }
+}
+
+function installPlainSlots(): void {
+  plainFill ??= (adopt, start, end, name, projected, fallback, dirty) => {
+    const frame = plainFrames.get(projected);
+    if (frame === undefined || frame.names !== undefined && !frame.names.has(name)) return undefined;
+    const assigned = projected.filter(([node, slot]) => slot === name && !projectionRejected(node)).map(([node]) => node);
+    if (assigned.length === 0 || assigned.some(node => node.nodeType === 1 && (node as Element).localName === "template")) return undefined;
+    return (record, make, patch) => {
+      const { instance } = frame;
+      const claims = frame.claims ??= new ProjectionClaims();
+      const owner = {};
+      const doc = start.ownerDocument!;
+      let open = start, close = end, first = true, held = false;
+      let cancel: (() => void) | undefined;
+      let block: PlainBlock | undefined;
+      let stops: (() => void)[] = [];
+      let latest = dirty;
+      let lifetime: ReturnType<typeof createEffect> | undefined;
+      const server = adopt ? serverMark(start) : undefined;
+      // An adopted fallback leaves plain content at the server's other outlet until it releases it.
+      let borrowed = server?.attributes.has("fallback") === true && assigned.some(node => borrowedRanges.get(instance.e)?.includes(node));
+      const draw = (): void => {
+        cancel?.(); cancel = undefined;
+        for (const stop of stops) stop();
+        stops = [];
+        dispose(block); block = undefined;
+        const available = !borrowed && claims.take(name, owner);
+        if (available) held = true;
+        const parent = open.parentNode!, before = open.previousSibling, after = close.nextSibling;
+        if (!first) {
+          const a = doc.createComment(""), b = doc.createComment("");
+          parent.insertBefore(a, open);
+          for (let node: ChildNode | null = open; node !== null;) {
+            const next: ChildNode | null = node.nextSibling;
+            node.remove();
+            if (node === close) break;
+            node = next;
+          }
+          a.after(b); open = a; close = b;
+        }
+        const at = (first && adopt ? adoptSlot : fillSlot)(open, close, name, available ? projected : [], fallback, undefined, latest, stops);
+        open = (before?.nextSibling ?? parent.firstChild) as ChildNode;
+        close = (after?.previousSibling ?? parent.lastChild) as ChildNode;
+        if (available && lifetime !== undefined) claims.track(name, owner, open, lifetime);
+        if (at !== undefined && !Array.isArray(at)) {
+          block = make(latest, first && adopt ? at as ChildNode : undefined);
+          if (block.n !== at) placeFallback(at as ChildNode, block.n);
+        }
+        if (!available) cancel = claims.wait(name, open, () => { borrowed = false; draw(); });
+        first = false;
+      };
+      const effect = createEffect(instance.q, () => {
+        let active = true;
+        const activate = (): void => { if (active) draw(); };
+        if (!frame.deferred || instance.c() || adopt && open.isConnected || placed(open, activate)) draw();
+        return () => {
+          active = false;
+          cancel?.(); cancel = undefined;
+          if (held) { claims.release(name, owner); held = false; }
+        };
+      }, 2);
+      lifetime = effect;
+      claims.track(name, owner, open, effect);
+      instance.o.push(effect);
+      (record.z ??= []).push(() => { release(instance, effect); dispose(block); for (const stop of stops) stop(); });
+      return (changed, dirty) => { latest = dirty; if (block !== undefined) patch(block as never, changed, dirty); };
+    };
+  };
+}
+
+/** Uses shared plain placement only for a projection whose authored features require it. */
+export function initializeSlot(...args: Parameters<typeof fillSlot>): ReturnType<typeof fillSlot> | PlainSetup {
+  return args[5] === undefined ? plainFill?.(false, args[0], args[1], args[2], args[3], args[4], args[6] ?? new Map()) ?? fillSlot(...args) : fillSlot(...args);
+}
+export function adoptPlainSlot(...args: Parameters<typeof adoptSlot>): ReturnType<typeof adoptSlot> | PlainSetup {
+  return args[5] === undefined ? plainFill?.(true, args[0], args[1], args[2], args[3], args[4], args[6] ?? new Map()) ?? adoptSlot(...args) : adoptSlot(...args);
+}
+
 /** Each top-level projected node's projection entry, which follows an invoked component's root. */
 const projectedEntries = new WeakMap<Node, [Node, string]>();
+/** Invocation routing stays with a replaced root independently of its rendered attributes. */
+const invocationSlots = new WeakMap<Node, string>();
 /** Components invoked in projected content no slot has placed yet, by the top-level projected node holding them. */
 const waiting = new WeakMap<Node, Map<Node, () => void>>();
 /** How deeply generated renders are nested, and what runs once the outermost one has inserted what it built. */
@@ -1401,6 +1652,8 @@ let rendering = 0;
 let afterRender: (() => void) | undefined;
 
 function follows(previous: Node, root: Node): void {
+  const slot = invocationSlots.get(previous);
+  if (slot !== undefined) invocationSlots.set(root, slot);
   const entry = projectedEntries.get(previous);
   if (entry === undefined) return;
   entry[0] = root;
@@ -1534,6 +1787,16 @@ export function project(
   return instance.J = projected;
 }
 
+/** A projection whose component can be an accepted entry in the compiled graph. */
+export function projectAccepted(instance: Parameters<typeof project>[0], children: Parameters<typeof project>[1], slots: Parameters<typeof project>[2], tag: string): Projection {
+  const projected = project(instance, children, slots);
+  if (tag === pendingPlainTag) {
+    pendingPlainTag = undefined;
+    plainFrames.set(projected, { instance: instance as GeneratedInstance, deferred: true });
+  }
+  return projected;
+}
+
 /**
  * A rendering of a consumer's slot template: its nodes, the slot's prop values it reads, and the
  * range markers its outlet put it between.
@@ -1587,10 +1850,10 @@ export function scopedTemplate(carrier: Element, template: ScopedTemplate): Scop
  */
 export function fillSlot(
   start: ChildNode, end: ChildNode, name: string, projected: Projection, fallback: boolean,
-  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>,
+  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>, stops?: (() => void)[],
 ): ChildNode | readonly [ScopedTemplate, ScopedRecord] | undefined {
   const doc = start.ownerDocument!;
-  const assigned = projected.filter((entry) => entry[1] === name).map(([node]) => node);
+  const assigned = projected.filter((entry) => entry[1] === name && !projectionRejected(entry[0])).map(([node]) => node);
   const slot = `slot="${name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}"`;
   let rendered: readonly [ScopedTemplate, ScopedRecord] | undefined;
   // A slot with props, or one given a consumer's <template slot>, renders that template afresh,
@@ -1635,7 +1898,7 @@ export function fillSlot(
       for (const realize of pending.values()) realize();
     }
   }
-  return regional?.at?.(open) ?? rendered;
+  return regional?.at?.(open, stops) ?? rendered;
 }
 
 /**
@@ -1646,11 +1909,11 @@ export function fillSlot(
  */
 export function adoptSlot(
   start: ChildNode, end: ChildNode, name: string, projected: Projection, fallback: boolean,
-  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>,
+  props?: Record<string, unknown>, dirty?: Map<unknown, 1 | 2>, stops?: (() => void)[],
 ): ChildNode | readonly [ScopedTemplate, ScopedRecord] | undefined {
   const mark = serverMark(start);
   const rendered = mark?.target === "start" && start !== end;
-  const assigned = projected.filter((entry) => entry[1] === name).map(([node]) => node);
+  const assigned = projected.filter((entry) => entry[1] === name && !projectionRejected(entry[0])).map(([node]) => node);
   const carrier = assigned.find((node) => node.nodeType === 1 && (node as Element).localName === "template") as Element | undefined;
   const contents: Node[] = [];
   if (rendered) for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling) contents.push(node);
@@ -1682,7 +1945,7 @@ export function adoptSlot(
       for (const realize of pending.values()) realize();
     }
     // Given only the consumer's regions, the slot keeps a fallback block for when they render nothing.
-    return regional?.at?.(start);
+    return regional?.at?.(start, stops);
   }
   // Rendered otherwise: the slot fills as it would have, in place of what the server rendered.
   const doc = start.ownerDocument!;
@@ -1693,7 +1956,7 @@ export function adoptSlot(
   start.replaceWith(open);
   if (end === start) open.after(close);
   else end.replaceWith(close);
-  return fillSlot(open, close, name, projected, fallback, props, dirty);
+  return fillSlot(open, close, name, projected, fallback, props, dirty, stops);
 }
 
 /**
@@ -1712,15 +1975,19 @@ export function placeFallback(at: ChildNode, nodes: Node): void {
 
 /**
  * A server root's projection, as its factory is given one: what each of its rendered slot ranges
- * holds, then what the serializer carried, by slot. The carrier is consumed.
+ * holds, then what the serializer carried, by slot. The carrier is consumed. A slot its factory's
+ * caller gives content holds that content instead, such as a renderer's regions around the server's nodes.
  */
-export function serverProjection(root: Element, tag: string): [children: Node[], slots: Record<string, Node[]>] {
+export function serverProjection<T = Node>(
+  root: Element, tag: string, givenChildren: T[] = [], givenSlots: Record<string, T[]> = {},
+): [children: (Node | T)[], slots: Record<string, (Node | T)[]>] {
   const children: Node[] = [];
   const slots: Record<string, Node[]> = {};
   const server = serverRanges(root, true, tag);
   const add = (node: Node, slot: string): void => { if (slot === "") children.push(node); else (slots[slot] ??= []).push(node); };
   for (const range of server?.ranges ?? []) {
-    if (range.scoped) continue;
+    // A `<slot of>` range borrows a child's slot (rendered-form#borrowed-slot-ranges): its outlet adopts it.
+    if (range.scoped || serverMark(range.markers[0]!)!.attributes.has("of")) continue;
     if (!range.fallback) for (const node of range.content) add(node, range.slot);
     // After a fallback, the marks of the consumer's regions that render nothing, which its adoption registered.
     else for (let index = 0; index < range.content.length; index += 1) {
@@ -1730,9 +1997,282 @@ export function serverProjection(root: Element, tag: string): [children: Node[],
       add(range.content[++index]!, region[0]);
     }
   }
-  for (const node of server?.carried ?? []) add(node, node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : "");
-  return [children, slots];
+  let region: readonly [string, Node] | undefined;
+  for (const node of server?.carried ?? []) {
+    region ??= regionSlots.get(node);
+    add(node, region?.[0] ?? (node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : ""));
+    if (node === region?.[1]) region = undefined;
+  }
+  return [givenChildren.length > 0 ? givenChildren : children, { ...slots, ...givenSlots }];
 }
+
+/** Each accepted child's entry in its parent's `as` list, made once, and the child each entry stands for. */
+const childEntries = new WeakMap<GeneratedInstance, object>();
+const entryChildren = new WeakMap<object, GeneratedInstance>();
+/** A list's update, by the start mark of each consumer region among the children it reads. */
+const listWatchers = new WeakMap<Node, () => void>();
+
+/** A consumer region at the top of a slot with `accepts` rendered: the slot's list follows what it holds now. */
+export function listChanged(start: Node): void {
+  listWatchers.get(start)?.();
+}
+
+/** A child's entry: its props, read live through getters, in an object that keeps its identity. */
+function entryOf(child: GeneratedInstance): object {
+  let entry = childEntries.get(child);
+  if (entry === undefined) {
+    const props: PropertyDescriptorMap = {};
+    for (const [name, handle] of Object.entries(child.B?.h ?? {})) props[name] = { get: () => handle.value, enumerable: true };
+    childEntries.set(child, entry = Object.freeze(Object.create(null, props) as object));
+    entryChildren.set(entry, child);
+  }
+  return entry;
+}
+
+/**
+ * Keeps a slot's `as` list (components#columns-as-markup) in root `index`: one entry per accepted child
+ * projected into `slot`, in content order, following the consumer's regions as they render (`listChanged`).
+ * Other children are left out with a warning. Returns what each
+ * render calls first: an entry whose props changed is marked in its written objects, under NESTED.
+ */
+export function childList(
+  instance: GeneratedInstance, spec: GeneratedStateSpec, values: unknown[], index: number, projection: Projection,
+  slot: string, accepts: readonly string[], named: string, listed: string,
+): (changed: number, dirty: Map<unknown, 1 | 2>) => number {
+  const pending = new Set<object>();
+  const watched = new Map<object, ReactiveEffect>();
+  const leftOut = (key: string, message: string): void => warnOnce(spec, `accepts:${slot}:${key}`, message);
+  const read = (): object[] => {
+    const next: object[] = [];
+    for (const [node, name] of withRegionContent(projection)) {
+      if (name !== slot) continue;
+      if (node.nodeType === 8) {
+        if (/^html-next:(?:each-)?start$/.test((node as Comment).data)) listWatchers.set(node, update);
+        continue;
+      }
+      if (node.nodeType === 3) {
+        if (/[^\t\n\f\r ]/.test((node as Text).data)) {
+          leftOut("#text", `${named} accepts ${listed}; this text is left out.`);
+          rejectProjection(node);
+        }
+        continue;
+      }
+      if (node.nodeType !== 1) continue;
+      const child = (node as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+      const tag = child?.S.g ?? (node as Element).localName;
+      if (child !== undefined && accepts.includes(tag)) {
+        next.push(entryOf(child));
+        continue;
+      }
+      const delegated = child?.D?.find((inner) => accepts.includes(inner.S.g))?.S.g;
+      leftOut(tag, delegated === undefined ? `${named} accepts ${listed}; this \`<${(node as Element).localName}>\` is left out.`
+        : `\`<${tag}>\` is a preset of \`${delegated}\`, which ${named} accepts; a preset among accepted children is not supported yet, so it is left out.`);
+      if (delegated === undefined) rejectProjection(node);
+    }
+    return next;
+  };
+  // Each entry's props are watched while it is listed: a change re-renders what reads that entry.
+  const watch = (list: readonly object[]): void => {
+    for (const [entry, effect] of watched) if (!list.includes(entry)) { watched.delete(entry); release(instance, effect); }
+    for (const entry of list) {
+      if (watched.has(entry)) continue;
+      let last: unknown[] | undefined;
+      const effect = createEffect(instance.q, () => {
+        const now = Object.keys(entry).map((key) => (entry as Record<string, unknown>)[key]);
+        if (last !== undefined && now.some((value, at) => !Object.is(value, last![at]))) {
+          pending.add(entry);
+          instance.w(index, values[index]);
+        }
+        last = now;
+      }, 2, instance.c());
+      instance.o.push(effect);
+      watched.set(entry, effect);
+    }
+  };
+  function update(): void {
+    const previous = values[index] as object[];
+    const next = read();
+    if (next.length === previous.length && next.every((entry, at) => entry === previous[at])) return;
+    instance.w(index, next);
+    instance.X?.n?.(index, previous, next);
+    watch(next);
+  }
+  values[index] = read();
+  // `host.slots` lists the slot's elements as the consumer's regions hold them now, entries or not.
+  const key = slot === "" ? "default" : slot;
+  const slots = instance.Y;
+  const given = (): Element[] => withRegionContent(projection).flatMap(([node, name]) => name === slot && node.nodeType === 1 ? [node as Element] : []);
+  (instance as { Y?: object }).Y = new Proxy({}, {
+    get: (_target, name) => name === key ? given() : slots?.[name as string],
+    has: (_target, name) => name === key ? given().length > 0 : slots !== undefined && name in slots,
+  });
+  return (changed, dirty) => {
+    if (changed === -1) watch(values[index] as object[]);
+    if (pending.size === 0) return 0;
+    for (const entry of pending) dirty.set(entry, 1);
+    pending.clear();
+    return NESTED;
+  };
+}
+
+export { borrowedSlots } from "./rendered-form.js";
+
+/** The child whose slot a `<slot of>` outlet placed each node from: its logical parent for context. */
+const placedOwners = new WeakMap<Node, GeneratedInstance>();
+/** Set by the first `<slot of>` outlet, so a context search without one only walks the tree. */
+let placedOwner: ((node: Element) => Element | undefined) | undefined;
+
+/**
+ * What an outlet knows of each accepted child's slots, by tag: those its own template places, those
+ * that declare props, every slot it declares, and those names as a warning lists them.
+ */
+export type ChildSlots = Readonly<Record<string, readonly [outlets: readonly string[], scoped: readonly string[], known: readonly string[], listed: string]>>;
+
+/**
+ * `<slot of="$column" name="cell">`: places slot `name` of the child whose entry `of` names, between
+ * rendered-form marks that carry the entry's index in its list (rendered-form#borrowed-slot-ranges).
+ * The child's `<template slot>` renders afresh with the outlet's props; its plain content keeps its
+ * identity, placed by the first outlet that renders it unless its own template places that slot; else
+ * the outlet's fallback block renders (`make`, `patch`). It renders again only when `of` names
+ * another entry. `shapes` checks and converts the props a template receives by the child's slot
+ * declaration, by its tag, as live's `childSlotProps` does. `adopt` adopts the range the server rendered.
+ */
+export function childOutlet(
+  record: { z?: (() => void)[] }, start: ChildNode, end: ChildNode, name: string, slots: ChildSlots, spec: GeneratedStateSpec,
+  make: (dirty: Map<unknown, 1 | 2>, at?: ChildNode) => { readonly n: Node; z?: (() => void)[] },
+  patch: (block: never, changed: number, dirty: Map<unknown, 1 | 2>) => void, given: boolean,
+  shapes: Readonly<Record<string, (props: Record<string, unknown>) => Record<string, unknown>>> | undefined, adopt?: boolean,
+): (value: unknown, list: unknown, props: Record<string, unknown>, changed: number, dirty: Map<unknown, 1 | 2>) => void {
+  const doc = start.ownerDocument!;
+  let open = start, close = end;
+  // Whether `open` and `close` are rendered-form marks: this outlet's, or the server's it adopted.
+  let marked = false;
+  let shown: object | null | undefined;
+  let rendering: readonly [ScopedTemplate, ScopedRecord] | undefined;
+  let block: ReturnType<typeof make> | undefined;
+  let claimed: Node[] = [];
+  let claimFrame: PlainFrame | undefined;
+  let cancel: (() => void) | undefined;
+  let shape: ((props: Record<string, unknown>) => Record<string, unknown>) | undefined;
+  let flags = "";
+  const clear = (): void => {
+    if (rendering !== undefined) {
+      rendering[0].l.delete(rendering[1]);
+      dispose(rendering[1]);
+      rendering = undefined;
+    }
+    dispose(block);
+    block = undefined;
+    claimFrame?.claims?.release(name, open);
+    claimFrame = undefined;
+    releaseContent(claimed);
+    claimed = [];
+    cancel?.();
+    cancel = undefined;
+  };
+  (record.z ??= []).push(clear);
+  placedOwner ??= (node) => placedOwners.get(node)?.e;
+  const update = (value: unknown, list: unknown, props: Record<string, unknown>, changed: number, dirty: Map<unknown, 1 | 2>): void => {
+    if (value === NONCONFORMING) return;
+    for (const key in props) if (props[key] === NONCONFORMING) delete props[key];
+    const index = ownedEntryIndex(value, list);
+    const entry = index < 0 || !entryChildren.has(value as object) ? null : value as object;
+    if (entry !== shown) {
+      const server = shown === undefined && adopt === true ? serverMark(open) : undefined;
+      shown = entry;
+      clear();
+      const contents: Node[] = [];
+      if (server !== undefined) {
+        marked = true;
+        for (let node = open.nextSibling; node !== null && node !== close; node = node.nextSibling) contents.push(node);
+      } else if (!marked) {
+        marked = true;
+        open = renderedFormMark(doc, "start", "") as ChildNode;
+        close = renderedFormMark(doc, "end", "") as ChildNode;
+        start.replaceWith(open);
+        end.replaceWith(close);
+      } else clearRegion(open as Comment, close as Comment);
+      // What renders: the child's template (1), its plain content (2), or the fallback (0).
+      let mode = 0;
+      let scoped = given;
+      let content: Node[] = [];
+      const child = entry === null ? undefined : entryChildren.get(entry)!;
+      const known = child === undefined ? undefined : slots[child.S.g];
+      if (child !== undefined && known !== undefined && !known[2].includes(name)) {
+        warnOnce(spec, `of:${child.S.g}:${name}`, `\`${child.S.g}\` declares the slots ${known[3]}; \`${name}\` is unknown.`);
+      } else if (child !== undefined && known !== undefined) {
+        scoped ||= known[1].includes(name);
+        // A server range of plain content holds the child's own nodes, which no carrier copied.
+        if (server !== undefined && !server.attributes.has("fallback") && !server.attributes.has("scoped")) {
+          for (const node of contents) if (!child.J!.some(([given]) => given === node)) (child.J as [Node, string][]).push([node, name]);
+        }
+        content = withRegionContent(child.J ?? []).flatMap(([node, slot]) => slot === name ? [node] : []);
+        if (content.some((node) => node.nodeType === 1 && (node as Element).localName === "template")) mode = 1;
+        else if (content.length > 0 && scoped) warnOnce(spec, `of:${child.S.g}:${name}:plain`, `\`${name}\` has props, so its content is a \`<template slot="${name}">\`.`);
+        else if (content.length > 0) {
+          const frame = plainFrames.get(child.J!);
+          const retry = (): void => { if (shown === entry) { shown = released; update(value, list, props, 0, new Map()); } };
+          if (frame !== undefined) {
+            const claims = frame.claims ??= new ProjectionClaims();
+            if (claims.take(name, open)) { mode = 2; claimFrame = frame; }
+            else cancel = claims.wait(name, open, retry);
+          } else if (!content.some(node => borrowedContent.has(node))) mode = 2;
+          else cancel = awaitContent(content, open, retry);
+        }
+      }
+      // The server rendered the same choice: its nodes are adopted. Otherwise they go, and it renders afresh.
+      const kept = server !== undefined && (mode === 0) === server.attributes.has("fallback") && (mode === 1) === (mode !== 0 && server.attributes.has("scoped"));
+      if (server !== undefined && !kept) for (const node of contents) node.parentNode?.removeChild(node);
+      if (mode === 1) {
+        shape = shapes?.[child!.S.g];
+        if (shape !== undefined) props = shape(props);
+        const carrier = content.find((node) => (node as Element).localName === "template") as HTMLTemplateElement;
+        const template = scopedTemplates.get(carrier) ?? runtimeTemplate(carrier, Object.keys(props));
+        const made = kept ? (template.m as (dirty: Map<unknown, 1 | 2>, props: Record<string, unknown>, at?: Node) => ScopedRecord)(dirty, props, open)
+          : template.m(dirty, props);
+        if (made.n !== open) {
+          if (kept) clearRegion(open as Comment, close as Comment);
+          for (const node of Array.from(made.n.childNodes)) markProjectedRoot(node);
+          close.before(made.n);
+        }
+        template.l.add(made);
+        made.r = [open, close];
+        rendering = [template, made];
+        scoped = true;
+      } else if (mode === 2) {
+        claimed = content;
+        for (const node of content) borrowedContent.add(node);
+        if (!kept) close.before(...content);
+        // Components invoked in the content this outlet now places are created, as `fillSlot` creates them.
+        for (const node of content) {
+          const pending = waiting.get(node);
+          if (pending === undefined) continue;
+          waiting.delete(node);
+          for (const realize of pending.values()) realize();
+        }
+      } else {
+        block = make(dirty, kept ? open : undefined);
+        if (block.n !== open) {
+          if (kept) clearRegion(open as Comment, close as Comment);
+          close.before(block.n);
+        }
+      }
+      if (mode !== 0) for (let node = open.nextSibling; node !== null && node !== close; node = node.nextSibling) placedOwners.set(node, child!);
+      flags = `${mode === 0 ? ' fallback=""' : ""}${scoped ? ' scoped=""' : ""}`;
+    } else if (rendering !== undefined) {
+      if (shape !== undefined) props = shape(props);
+      const current = rendering[1].s;
+      let write = changed & NESTED;
+      for (const key in props) if (!(key in current && Object.is(current[key], props[key]))) { current[key] = props[key]; write = 1; }
+      if (write) rendering[0].p(rendering[1], NESTED, dirty);
+    } else if (block !== undefined) patch(block as never, changed, dirty);
+    writeMark(open, "start", `slot="${name}" of="${index < 0 ? "" : index}"${flags}`);
+  };
+  return update;
+}
+
+/** Marks an outlet as showing no entry, so it renders its entry again. */
+const released = {};
 
 /** A compiled factory that adopts a server-rendered root given as its third argument. */
 type AdoptingFactory = (options: object, html: Readonly<Record<string, string>> | undefined, root: Element) => Element;
@@ -1931,6 +2471,29 @@ export function checkReference(spec: GeneratedStateSpec, value: unknown, type: C
   if (referenceConforms(value, type)) return true;
   warnOnce(spec, key, message);
   return false;
+}
+
+/** Build-time reference metadata. Child choices are finite, shared and independent of input keys. */
+export type ReferenceSchema = 0 | readonly [
+  type: CompactType, label: string, fields?: Readonly<Record<string, ReferenceSchema>>,
+  numeric?: ReferenceSchema, other?: ReferenceSchema,
+];
+
+const referenceIndex = /^\d+$/;
+
+/** Advances a computed reference's declared schema without allocating a path or union. */
+export function referenceSchemaAt(schema: ReferenceSchema, key: unknown): ReferenceSchema {
+  if (schema === 0 || typeof key !== "string" && typeof key !== "number") return 0;
+  const fields = schema[2];
+  if (fields !== undefined && Object.hasOwn(fields, key)) return fields[key]!;
+  return (typeof key === "number" || referenceIndex.test(key) ? schema[3] : schema[4]) ?? 0;
+}
+
+/** Validates the value already read, so accessors and computed keys execute exactly once. */
+export function checkedReferenceValue(spec: GeneratedStateSpec, value: unknown, schema: ReferenceSchema, key: string, name: string): unknown {
+  if (schema === 0 || value === NONCONFORMING || referenceConforms(value, schema[0])) return value;
+  warnOnce(spec, key, `Reference \`${name}\` must satisfy ${schema[1]}.`);
+  return NONCONFORMING;
 }
 
 /**
@@ -2271,4 +2834,130 @@ export function attachGeneratedController(
     return deactivate === undefined ? disconnect : () => { disconnect(); deactivate(); };
   }, handle);
   return handle;
+}
+
+/** Fold initial input forms before a child initializes state from its effective props. */
+export function initialInvocationInputs(writes: readonly (Readonly<Record<string, unknown>> | readonly [string, unknown, ("value" | "class" | "style")?, string?])[], names: readonly (readonly [string, string])[]): {
+  readonly html: Record<string, string>; readonly props: Record<string, unknown>; readonly attributes: Record<string, unknown>;
+} {
+  const html: Record<string, string> = Object.create(null), props: Record<string, unknown> = Object.create(null), attributes: Record<string, unknown> = Object.create(null);
+  let probe: HTMLElement | undefined;
+  const put = (name: string, value: unknown, kind?: "value" | "class" | "style", fallback?: string): void => {
+    if (value === NONCONFORMING) { if (fallback === undefined) return; value = fallback; }
+    const prop = names.find(([attribute]) => asciiLowerCase(attribute) === asciiLowerCase(name))?.[1];
+    if (kind === "value" && prop !== undefined) { props[prop] = value; delete html[prop]; return; }
+    if (kind === "class" || kind === "style") {
+      const attribute = kind;
+      const targetProp = names.find(([name]) => name === attribute)?.[1];
+      const current = targetProp === undefined ? attributes[attribute] : Object.hasOwn(props, targetProp) ? props[targetProp] : html[targetProp];
+      probe ??= document.createElement("i");
+      if (current == null) probe.removeAttribute(attribute); else probe.setAttribute(attribute, String(current));
+      if (kind === "class") probe.classList.toggle(name, truthy(value as Value));
+      else probe.style.setProperty(name, toText(value as Value));
+      put(attribute, probe.getAttribute(attribute));
+      return;
+    }
+    let text = toAttribute(value as Value, name);
+    if (text !== null && isUrlAttribute(name) && hasExecutableUrl(text)) text = null;
+    if (prop !== undefined) {
+      delete props[prop];
+      if (text === null) delete html[prop]; else html[prop] = text;
+    } else if (text === null) delete attributes[name]; else attributes[name] = text;
+  };
+  for (const write of writes) {
+    if (Array.isArray(write)) put(write[0], write[1], write[2], write[3]);
+    else for (const [name, value] of Object.entries(write)) if (toAttribute(value as Value, name) !== null) put(name, value);
+  }
+  return { html, props, attributes };
+}
+
+/** Replace a generated instance's unclaimed HTML inputs and replay its authored destinations. */
+export function setInvocationAttributes(element: Element, attributes: Readonly<Record<string, unknown>>): void {
+  const instance = (element as RuntimeElement)[lifecycleKey]?.h as GeneratedInstance | undefined;
+  const input = instance?.F;
+  if (instance === undefined || input === undefined) return;
+  const props = Object.keys(instance.B?.D.props ?? {});
+  const next = Object.fromEntries(Object.entries(forwardedAttributes(attributes)).flatMap(([name, value]) => {
+    const normalized = asciiLowerCase(name);
+    if (props.some(prop => asciiLowerCase(prop) === normalized || kebabCase(prop) === normalized)) return [];
+    const text = forwardedAttributeText(name, value);
+    return text === null ? [] : [[name, text]];
+  }));
+  let changed = false;
+  for (const name of Object.keys(input.values)) if (!Object.hasOwn(next, name)) { delete input.values[name]; changed = true; }
+  for (const [name, value] of Object.entries(next)) if (!Object.is(input.values[name], value)) { input.values[name] = value; changed = true; }
+  if (changed) input.draw();
+}
+
+/** Update the receiving component's attribute inputs; authored destinations own the DOM writes. */
+export function writeInvocationAttribute(child: GeneratedInstance, name: string, value: string | null): void {
+  const record = child.B;
+  const propName = record === undefined ? undefined : Object.keys(record.D.props).find(prop => kebabCase(prop) === name);
+  if (record !== undefined && propName !== undefined) {
+    const prop = record.D.props[propName]!;
+    const from = prop.select?.from;
+    const checks = chosen(record.D.props, prop, from === undefined ? {} : { [from]: record.v[record.n.length + Object.keys(record.D.props).indexOf(from)] });
+    const accepted = taken(checks, value, "html", prop.default);
+    if (accepted !== undefined) record.u!({ [propName]: accepted });
+    record.i[propName] = { value, source: "html", present: value !== null, provided: value !== null };
+    return;
+  }
+  const input = child.F;
+  if (input === undefined || Object.is(input.values[name], value)) return;
+  if (value === null) delete input.values[name]; else input.values[name] = value;
+  input.draw();
+}
+
+const invocationAttributeProbes = /* @__PURE__ */ new WeakMap<GeneratedInstance, HTMLElement>();
+
+/** A keyed class/style input composes on the logical invocation before its destination renders. */
+export function writeInvocationModifier(child: GeneratedInstance, target: "class" | "style", name: string, value: string | boolean): void {
+  const record = child.B;
+  const prop = record === undefined ? undefined : Object.keys(record.D.props).find(prop => kebabCase(prop) === target);
+  if (prop === undefined && child.F === undefined) return;
+  const current = prop === undefined ? child.F!.values[target] : record!.v[record!.n.length + Object.keys(record!.D.props).indexOf(prop)];
+  let probe = invocationAttributeProbes.get(child);
+  if (probe === undefined) { probe = document.createElement("i"); invocationAttributeProbes.set(child, probe); }
+  const before = toAttribute(current as Value, target);
+  if (before === null) probe.removeAttribute(target); else probe.setAttribute(target, before);
+  if (target === "class") probe.classList.toggle(name, value as boolean);
+  else probe.style.setProperty(name, value as string);
+  const after = probe.getAttribute(target);
+  if (after !== before) writeInvocationAttribute(child, target, after);
+}
+
+function forwardedAttributeText(name: string, value: unknown): string | null {
+  const text = toAttribute(value as Value, name);
+  return text !== null && isUrlAttribute(name) && hasExecutableUrl(text) ? null : text;
+}
+
+export function resetForwardedInvocationAttributes(child: GeneratedInstance, inputs: Readonly<Record<string, unknown>>, previous?: readonly string[]): void {
+  for (const name of previous ?? []) if (forwardedAttributeText(name, inputs[name]) === null) writeInvocationAttribute(child, name, null);
+}
+
+/** Remove keys that stopped being forwarded before replaying the destination's authored writes. */
+export function resetForwardedAttributes(element: Element, inputs: Readonly<Record<string, unknown>>, previous?: readonly string[]): void {
+  for (const name of previous ?? []) if (forwardedAttributeText(name, inputs[name]) === null) writeAttribute(element, name, null);
+}
+
+/** Apply only authored forwarding, through the existing attribute and URL policies. */
+export function forwardAttributes(element: Element, inputs: Readonly<Record<string, unknown>>): string[] {
+  const names: string[] = [];
+  for (const [name, value] of Object.entries(inputs)) {
+    const text = forwardedAttributeText(name, value);
+    if (text === null) continue;
+    names.push(name);
+    if (isUrlAttribute(name)) writeUrlAttribute(element, name, text); else writeAttribute(element, name, text);
+  }
+  return names;
+}
+
+export function forwardInvocationAttributes(child: GeneratedInstance, inputs: Readonly<Record<string, unknown>>): string[] {
+  const names: string[] = [];
+  for (const [name, value] of Object.entries(inputs)) {
+    const text = forwardedAttributeText(name, value);
+    if (text === null) continue;
+    names.push(name); writeInvocationAttribute(child, name, text);
+  }
+  return names;
 }

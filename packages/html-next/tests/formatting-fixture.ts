@@ -12,7 +12,7 @@ export const formattingSource = `<template component="x-formatting"><defs>
   <computed name="label" from="format($amount, { style: 'currency', currency: $currency }, $locale)"></computed>
   <handler name="change"><set name="amount" value="25"></set><set name="locale" value="fr-FR"></set><set name="currency" value="EUR"></set><set name="names" expr:value="['Bea', 'Cy']"></set></handler>
 <handler name="invalid"><set name="optionalAmount" value="0"></set><set name="currency" value="INVALID"></set><set name="names" expr:value="['Zed']"></set></handler>
-</defs><section from:aria-label="$label"><button type="button" on:click="change">Change</button><button type="button" on:click="invalid">Invalid currency</button>
+</defs><section $attributes from:aria-label="$label"><button type="button" on:click="change">Change</button><button type="button" on:click="invalid">Invalid currency</button>
   <p data-format="currency">Total: {format($amount, 'currency', { currency: $currency }, $locale)} due.</p>
   <output data-format="valueBinding" $value="format($amount, 'currency', { currency: $currency }, $locale)"></output>
   <p data-format="initialInvalid">Before {format(1, 'currency', {}, $locale)} after</p>

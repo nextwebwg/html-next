@@ -1,0 +1,125 @@
+{
+  "base": "be928ad02306156f4809c49af896571b24556efb",
+  "scope": "Native accepted-child selected-type ownership, stable borrowing identity, plain state copying and explicitly unknown boundary storage. Incremental work in the unfinished native renderer objective.",
+  "sourceHashes": {
+    "CHANGELOG.md": "592602ba728cf2f005ea3700d89c03eb3a15ea6817e506fcf509d9bb00976f04",
+    "packages/html-next-dotnet/README.md": "2d6247bae788fd650c47c790257e2ee9d4a240d64f01f2cf9484e8bcd7135b63",
+    "packages/html-next-dotnet/src/HtmlNext/AcceptedChildContext.cs": "804747c62550bd334e9a681025dba34f49c3a011387d1f371fe07486b21003b9",
+    "packages/html-next-dotnet/src/HtmlNext/BorrowedSlots.cs": "514654692073be55df61166ee363ad047a14ffba5bd51c43c4c8d05894667a57",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "b86ac56df364138fa89517ee1b40a033e59f24e5658b10bdb57645298d4a2119",
+    "packages/html-next-dotnet/src/HtmlNext/Expressions.cs": "c137c9f0adc5749149e3c243f736e04dc09e35088e1a7dccc8244ece5ea59edb",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "d3284b1b7cf8074bcc18d0b001e8d8dac49ea6009cd3ffefcbdd162dbdd74ce4",
+    "packages/html-next-dotnet/src/HtmlNext/LocalDeclaration.cs": "6c973fad5136e6d05cf34e89ee5fdbec7855f07f1ac886c3517a8006aa2465ce",
+    "packages/html-next-dotnet/src/HtmlNext/ValueType.cs": "5765d3f36e176a1ccde2e1afc39d0f65e7db294b4ae9352d0ac8d60b13da3bf8",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/AcceptedChildListTests.cs": "8e459f10798cef6cee24cf2b553385b2c46aee68945712815331f1c6f095b9ad",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/ScopedSlotTests.cs": "c7533a975ad10d0fbe822f0665e1aae92a4c820180711ecd952736301f544122"
+  },
+  "proof": {
+    "nativeCasesAdded": 9,
+    "cases": [
+      "Direct, computed and structural-alias entry reads follow the child selector, with a conflicting outer selector and concurrent Render/Write requests.",
+      "Two independently selected scalar fields retain their own types in a mixed component list across concurrent requests.",
+      "Untyped state copies lose borrowing identity and expose the raw prop snapshot.",
+      "Borrowed slots keep the original caller scope.",
+      "Empty entry size/truthiness includes only props, excluding private state slots.",
+      "Unknown scoped props drop originating selected checks.",
+      "A typed state copy with a nested unknown field retains object storage and raw dimensional strings.",
+      "Unknown scalar and nested structured scoped inputs do not infer dimensions from strings."
+    ],
+    "redEvidence": [
+      "Selected structured defaults rendered :3 in the child but bad:3 through its receiver and aliases.",
+      "Untyped entry state copy produced true: instead of false:3.",
+      "Empty entry/private state produced wrong:wrong:false instead of empty:empty:false.",
+      "Owner-aware entries initially caused a declared unknown scoped prop to hide the raw numeric value.",
+      "The nested unknown-field state copy produced : instead of 10px: before the proved projection correction."
+    ],
+    "nativeFinal": {
+      "passed": 913,
+      "skipped": 0
+    }
+  },
+  "verification": {
+    "repository": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "status": "passed",
+      "exitCode": 0,
+      "javascript": {
+        "passed": 2116,
+        "explicitlyGatedSkips": 5012,
+        "seconds": 357.59
+      },
+      "native": {
+        "passed": 913,
+        "skipped": 0
+      },
+      "fluidFullOutputValidations": 5,
+      "nativeClientIntegration": {
+        "passed": 6,
+        "browserGatedSkips": 3,
+        "seconds": 3.9
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "seconds": 60.58
+      },
+      "includes": [
+        "verify:inner",
+        "lint",
+        "typecheck",
+        "generated checks",
+        "size checks",
+        "native tests",
+        "client integration",
+        "builds",
+        "packed consumers"
+      ]
+    },
+    "browser": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH HTMLNEXT_BROWSER_TEST=1 HTMLNEXT_FIREFOX_ENDPOINT=ws://127.0.0.1:39991/native-hydration node scripts/test-dotnet-client.ts",
+      "exitCode": 0,
+      "passed": 9,
+      "skipped": 0,
+      "seconds": 13.87,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "coverage": "Existing native/client adoption regression gate. This does not establish full accepted-child adoption.",
+      "firefox": "Owned Linux arm64 Playwright1.64.0 container, pinned sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f, stopped and removed."
+    },
+    "allocations": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH dotnet run --project packages/html-next-dotnet/benchmarks -c Release -- --allocations",
+      "exitCode": 0,
+      "fullOutputsValidated": 5,
+      "repetitionsPerCase": 200,
+      "nativeTotalBytes": {
+        "card": 240,
+        "list-10": 1984,
+        "list-100": 19264,
+        "list-1000": 195664,
+        "cart-100": 19072
+      },
+      "comparison": "Unchanged from the existing observer totals for these five workloads. These cases do not measure accepted-entry rendering cost. No timing, retained/peak memory or serving claim."
+    }
+  },
+  "catalog": {
+    "loomaCommit": "714d557c0e042a16a274f107f77dcccd67070b69",
+    "nativeGraphs": 106,
+    "compiles": 80,
+    "firstFailures": 26,
+    "scope": "Refreshed compilation only, not rendering or browser qualification."
+  },
+  "review": {
+    "method": "Bounded single-agent lite correctness review and inline five-rubric simplification. No independent/cross-model reviewers.",
+    "confirmedFinding": "The explicit unknown-field reference view lost the actual nested compact storage layout. Its new native proof failed before the localized projection fix and passed afterward.",
+    "remainingFindings": [],
+    "simplificationEdits": 0,
+    "proofTestsPreserved": true
+  },
+  "limitations": [
+    "Full native styles, formatting, select controls, application preparation, accepted-child rendered form and complete catalog qualification remain unfinished.",
+    "The corresponding Node/generated-framework selected-entry default ownership bug remains open; this native proof is not included in the shared corpus until those owners pass.",
+    "Framework/runtime npm publication remains pending the owner rollout choice for the breaking explicit-forwarding migration. This increment publishes no npm or NuGet packages."
+  ]
+}

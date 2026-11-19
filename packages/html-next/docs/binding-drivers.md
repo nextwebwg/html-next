@@ -146,7 +146,7 @@ bindings.adopt(host, {
 The application obtains `snapshot` from the new preparation and `inputs` from the matching renderer
 record: each input is its accepted value and availability status. The synchronous `update` applies
 new caller props through the renderer's existing channel. Omission releases a previous caller fixture,
-but leaves a producer's current value alone. HTMLKit supplies this integration automatically.
+but leaves a producer's current value alone. Application hosts can supply this integration through the public bindings API.
 
 Adoption reuses the logical instance, factory, connection, and local state. A matching source revision
 and current selected input allow the source to accept prepared output through the typed input SDK.

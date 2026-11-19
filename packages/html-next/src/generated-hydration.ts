@@ -7,7 +7,7 @@ import { fail } from "./diagnostics.js";
 import { lifecycleKey, type ManagedComponentLifecycle, type RuntimeElement } from "./generated-lifecycle.js";
 import { manageIndexedLifecycle } from "./generated-lifecycle-index.js";
 import { raw, type KeyedList, type KeyedRow } from "./keyed.js";
-import { restoreSerializedFormDefaults, serverMark, serverRanges, type RenderedInstanceRecord } from "./rendered-form.js";
+import { restoreSerializedFormDefaults, serverMark, serverRanges, type HydrationRange, type RenderedInstanceRecord } from "./rendered-form.js";
 
 export { renderedInstanceRecord } from "./rendered-form.js";
 
@@ -139,15 +139,15 @@ export function adoptTree(spec: Spec | 5, base: Node, invoked: readonly number[]
  * hydration binds a consumer's projected nodes.
  */
 export function adoptProjection(spec: Spec, root: Element, tag: string, invoked: readonly number[] = [],
-  regions: Readonly<Record<number, string>> = {}): Node[] | undefined {
+  regions: Readonly<Record<number, string>> = {}, borrowed?: (root: Element) => readonly HydrationRange[]): Node[] | undefined {
   const server = serverRanges(root, false, tag);
   const runs = new Map<string, Cursor>();
-  for (const range of server?.ranges ?? []) {
+  for (const range of [...borrowed?.(root) ?? [], ...server?.ranges ?? []]) {
     if (range.scoped || runs.has(range.slot)) continue;
     // A range showing its fallback ends with the marks of the slot's regions that render nothing, two each.
     const empty = range.fallback ? Object.values(regions).filter((slot) => slot === range.slot).length * 2 : 0;
     if (range.fallback && empty === 0) continue;
-    runs.set(range.slot, { node: range.fallback ? range.content[range.content.length - empty]! : range.markers[0]!.nextSibling,
+    runs.set(range.slot, { node: range.fallback ? range.content[range.content.length - empty] ?? null : range.markers[0]!.nextSibling,
       end: range.markers[1] ?? range.markers[0]!, parent: range.markers[0]!.parentNode! });
   }
   const carried = server?.carried ?? [];

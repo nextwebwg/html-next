@@ -13,6 +13,8 @@ import { reactHostArtifact } from "../src/targets/react-host.js";
 import { reactEventsArtifact } from "../src/targets/react-events.js";
 import { reactPropsArtifact } from "../src/targets/react-props.js";
 import { reactRenderArtifact } from "../src/targets/react-render.js";
+import { attributeHelperArtifact } from "../src/targets/attribute-helper.js";
+import { inlineStyleArtifacts } from "../src/targets/inline-style.js";
 
 interface Host {
   state: Record<string, unknown>;
@@ -276,6 +278,8 @@ describe("React controller contract", () => {
       return module.exports;
     };
     modules.set("./props", await evaluate(reactPropsArtifact("test").content));
+    modules.set("./attributes", await evaluate(attributeHelperArtifact("react", "test").content));
+    modules.set("./style/style.js", await evaluate(inlineStyleArtifacts("react", "test").find(artifact => artifact.path.endsWith("style.browser.js"))!.content));
     modules.set("./events", await evaluate(reactEventsArtifact("test", true).content));
     modules.set("./host", await evaluate(reactHostArtifact("test").content));
     modules.set("./context", { componentContext: () => React.createContext({ value: undefined }) });

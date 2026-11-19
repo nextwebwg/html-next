@@ -1,0 +1,62 @@
+{
+  "base": "7d2aebf683ab14224cd347476869099fccaf24bf",
+  "scope": "Expose existing compiler-owned prepared-module revisions through the shared server manifest and native asset reader. This is a dependency for the unfinished native preparation adapter.",
+  "sourceHashes": {
+    "CHANGELOG.md": "79624238f41d336c7f6d488756c65e2c5cfa1c866aeaff927a1a7af6993e2306",
+    "packages/html-next-dotnet/README.md": "b9d2fb7a59b6f2c9c5e8c099c047d6fcaadef7035117bbec7aaaaa989edb9129",
+    "packages/html-next-dotnet/src/HtmlNext/ServerAssets.cs": "276a0ef40c704335116f06cbdeb97b28ed4179abf7b00453fe073dc290adbef4",
+    "packages/html-next-unplugin/README.md": "276e4d97d9ecb23c1c88aa09aecf15a35882031e23f6631155a90e216ed92a69",
+    "packages/html-next-unplugin/src/index.ts": "be74cc6f8feae5ca005e835ebd6cfa08b336a358e5a3db5b270c4fd7a2a6800c",
+    "packages/html-next-unplugin/tests/unplugin.test.ts": "4ea044a5048148409bab9a5fbe98a32e41b7d04c187cee7e53974b687e1272c8",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/PreparedModuleAssetsTests.cs": "aa4f78fd296b7503fe13d4e743a5d910d67292027c7bdf3dcb6532f8f530046c"
+  },
+  "proof": {
+    "nodeBeforeFix": "Three existing static/prepared transfer cases failed because server.preparedModules was absent.",
+    "nativeBeforeFix": "Six malformed/duplicate/unknown-owner cases failed because the metadata was ignored.",
+    "nodeAfterFix": {
+      "passed": 39,
+      "skipped": 0,
+      "seconds": 6.1,
+      "coverage": "All unplugin cases, including exact metadata revision equality with real nested and ordinary server preparation records and subsequent browser adoption."
+    },
+    "nativeAfterFix": {
+      "passed": 922,
+      "skipped": 0
+    },
+    "newNativeCases": 9,
+    "compatibility": "Legacy manifests without the additive field return an empty map. Revisions are opaque nonempty strings, not native-recomputed module hashes."
+  },
+  "verification": {
+    "development": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:inner",
+      "exitCode": 0,
+      "javascript": {
+        "passed": 2116,
+        "explicitlyGatedSkips": 5012,
+        "seconds": 389.46
+      },
+      "native": {
+        "passed": 922,
+        "skipped": 0
+      },
+      "fluidFullOutputValidations": 5,
+      "nativeClientIntegration": {
+        "passed": 6,
+        "browserGatedSkips": 3,
+        "seconds": 4.62
+      }
+    },
+    "wholePrCheckpoint": "The preceding7d2aebf6 increment passed full verify:pr, eight packed consumers and nine three-engine native/client cases. This additive metadata increment ran verify:inner and all unplugin tests. The full goal still needs final PR, catalog and compatibility qualification."
+  },
+  "review": {
+    "method": "One bounded inline lite correctness and five-rubric simplification pass, under the single-agent user instructions.",
+    "findings": [],
+    "simplificationEdits": 0,
+    "proofTestsPreserved": true
+  },
+  "limitations": [
+    "Native application preparation execution, exact selected-input key encoding, completion record writing and lifecycle remain unfinished.",
+    "No new runtime performance or memory claim.",
+    "The alpha92 publication revision remainsa703e965 and is unaffected by this alpha93 work. Publication remains pending the owner rollout choice. No packages were published by this increment."
+  ]
+}

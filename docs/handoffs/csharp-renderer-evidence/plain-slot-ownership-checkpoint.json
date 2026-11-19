@@ -1,0 +1,151 @@
+{
+  "checkpoint": "Plain projection ownership development checkpoint, based on 321a42f9",
+  "branch": "matthew-dean/c-renderer-handoff-goal",
+  "releaseVersion": "1.0.0-alpha.92",
+  "shipReady": false,
+  "goalStatus": "active",
+  "proposal": {
+    "repository": "nextwebwg/specs",
+    "commit": "ee83bc361313d3f2a30868bd890a606ac298091d",
+    "path": "html-next/components.md"
+  },
+  "behavior": [
+    "Node and compiled Vanilla share lazy plain-content claims across own, borrowed and repeated outlets while preserving caller scope, hydrated nodes, native edits and reconnect.",
+    "Angular creates a normal container view for server serialization and hydration, moves logical ownership to its source declaration container after rendering, and moves live nodes in native DOM order around structural anchors.",
+    "Ordinary no-prop template content renders afresh at each outlet. React and Preact permit zero-argument default and named template callbacks without intersecting inherited native children types.",
+    "React and Preact use a persistent portal source for fresh plain-content transfers. Their current server-to-client hydration path is defective and remains under development."
+  ],
+  "verification": {
+    "repositoryGate": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "javascriptPassed": 2084,
+      "javascriptGatedSkips": 4963,
+      "javascriptSeconds": 314.87,
+      "nativePassed": 844,
+      "nativeSkipped": 0,
+      "fluidCompleteOutputComparisons": 5,
+      "packedConsumersPassed": 8,
+      "packedConsumerSeconds": 59.82,
+      "includes": [
+        "lint",
+        "types",
+        "generated artifacts",
+        "runtime size budgets",
+        "native tests",
+        "build",
+        "packed consumers"
+      ]
+    },
+    "nodeAndVanilla": {
+      "passed": 12,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "modes": [
+        "fresh",
+        "hydrated"
+      ],
+      "coverage": [
+        "manual own-first/borrowed-first/unplaced/repeated structures",
+        "original edited native controls",
+        "caller conditions before and after transfers",
+        "reconnect",
+        "named and default lazy template instances"
+      ],
+      "sourceQualification": "Completed earlier in this checkpoint; these production owners were unchanged during the later Angular work."
+    },
+    "angular": {
+      "passed": 30,
+      "filtered": 36,
+      "seconds": 60.46,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "coverage": [
+        "24 columns cases including compiled, handwritten and ngTemplateOutlet fresh/server/hydrated consumers",
+        "three hydrated own/borrowed/repeated conditional-transfer cases with original preedited controls, reconnect and disposal",
+        "six shared conformance cases in development and production"
+      ],
+      "firefoxHost": "Linux arm64 Docker, Playwright1.64.0",
+      "firefoxImage": "mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f"
+    },
+    "reactAndPreactFresh": {
+      "passed": 12,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "modes": [
+        "development",
+        "production"
+      ],
+      "sourceQualification": "Earlier fresh suite preceded the added shared full-mount reconnect assertions. Production portal code was unchanged afterward; the new reconnect assertion is not qualified for these targets."
+    },
+    "reactAndPreactServer": {
+      "passed": 2,
+      "renderer": "React renderToString and preact-render-to-string",
+      "coverage": "Independent visible structures and repeated lazy content. Does not qualify hydration."
+    },
+    "reactAndPreactHydration": {
+      "command": "corepack pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/react-plain-hydration-parity.test.ts --maxWorkers=1",
+      "failed": 2,
+      "engines": [
+        "Chromium"
+      ],
+      "expected": "Original preedited input remains the same native node; no hydration recovery or console/page errors.",
+      "observed": "React expects the new client template placeholder where the server rendered an i and recovers the tree. Preact replaces the original input without reporting recovery.",
+      "gatedOutOfRepositoryGate": true
+    },
+    "sourceQualification": "All final production edits and Angular test additions preceded the broad gate. During that gate the React test helper changed from static markup to normal renderToString; both server tests passed separately afterward, and both actual hydration tests still failed.",
+    "review": "This is a development checkpoint. A bounded final review of the full ship-ready change is still required."
+  },
+  "remaining": [
+    "Resolve React and Preact actual framework hydration without replacing native controls or suppressing recoveries.",
+    "Align Vue and Svelte own/borrowed/repeated plain-content ownership and qualify SSR, hydration, transfers and reconnect.",
+    "Complete accepted presets and pending setup/context correctness across the JavaScript owners.",
+    "Complete native CSS, styles, formats and validity gaps; shared smallest-client selection, native asset ingestion, server preparation, identities, rendered-form records and native hydration.",
+    "Qualify the refreshed complete real Looma catalog for every target and all three engines, using renderer-independent assertions.",
+    "Measure fair Fluid/Node cached workloads for speed plus allocated, retained and peak memory. Complete final bounded review and protected release readiness."
+  ],
+  "limits": [
+    "No package publication, visibility change, PR or branch rename.",
+    "Native source is unchanged by this checkpoint. No current allocation, latency, retained/peak memory or catalog-performance claim.",
+    "Borrowed rendered-form recovery remains index-based; multiple own as lists and rejected siblings still need compiler-owned identity/preparation qualification.",
+    "A passing gated repository command does not qualify every browser target. The two failing hydration cases remain enabled in their dedicated target suite."
+  ],
+  "sourceHashes": {
+    "CHANGELOG.md": "8108080a1c3189ce7dff29b53a7abf7273b5cd414f2b09a71727d43a2e078438",
+    "docs/guide/quick-start.md": "d3444a4ba50b77e0df53ecf67994864f936d953bb8f7db64fb627b5497aff04b",
+    "packages/html-next-converter/tests/angular-columns-parity.test.ts": "d4484406a456c37fd72bc3464c84691e0dda435c31ec803da260f58cc9f3df28",
+    "packages/html-next-converter/tests/converter.test.ts": "91f03496667c9d9d9d25c90365d73893b2d4d251831dccdad231ab733c333424",
+    "packages/html-next-converter/tests/fixtures/plain-slot-rendering.ts": "a96a4bc191988865fd3a6fde35104421cb33e677ee7d7795b8e95fd4eff9a587",
+    "packages/html-next-converter/tests/plain-slot-rendering.test.ts": "64532a871251c8157d0f4e461535494d43ab9308ab77232ffa0b02836c891a5b",
+    "packages/html-next-converter/tests/react-plain-hydration-parity.test.ts": "80af10db708fceaa88b8a323f487be600bb077f573e9f00df65577a207992298",
+    "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts": "7fd3bcd58eba41c402748c212c9306e46eee47865d72a1c8c0f0697071fa7595",
+    "packages/html-next-converter/tests/svelte-public-conformance-parity.test.ts": "ba6c72f5500cc1be4819b199b2f65b3c2c6500a282c15be1db745e6d57ec0af9",
+    "packages/html-next/src/generated-hydration.ts": "e47812e9b93b3d1304c9e0aedddb436a194e0e6d20b4c96d334e3ea3b1ccc258",
+    "packages/html-next/src/generated-runtime.ts": "ea8a02f1158b9a5bc0f27c00e880a90d0120a770ff212d34a06b2e956aa6b6cf",
+    "packages/html-next/src/parser.ts": "ea25659286399cd0ca348bcef21431692adff1bb9c2174133aeb2706c0aa5534",
+    "packages/html-next/src/rendered-form.ts": "fa9bdeedbc4ff8d1caee038439043d2528c63742027f98aefaf8ecfdad86e74f",
+    "packages/html-next/src/runtime.ts": "d470bfde5ffaedccd3b625eb70214ecc871908818c91e0c20d8b82c2243e2c7c",
+    "packages/html-next/src/targets/angular.ts": "2904c9fccc5d6beddfdfa90cd3f0fe1aed48d5d61568177e7337fa1aa1004e8a",
+    "packages/html-next/src/targets/react-plain-source.ts": "b74b0c4277ba5e0426057447b164cc3e853d936a9580c7afa336e4e456c3aea6",
+    "packages/html-next/src/targets/react-render.ts": "5d331f71da001b630d61f562bf5814c9b379c0af1777a65a2a91ffc21f9c9c85",
+    "packages/html-next/src/targets/react.ts": "85ff5e384cb98c2f03145b61eafee98d25cc10305097f9ab13ed39b84fdb2667",
+    "packages/html-next/src/targets/vanilla-blocks.ts": "f82802ededc3a1117e73fcde966aeb8c8d27287d6cc8852bcacfefc4e90edf66",
+    "packages/html-next/src/template.ts": "f6bc21d7dce57ab9b0e160ad7fdeae36cb317e30fa858c7cdb9d9ad0b957b9b3",
+    "packages/html-next/tests/columns-browser.test.ts": "c28ae146445775cd630c519977b63556ba84a9d0dc3112edfcf456c9bb20dc95",
+    "packages/html-next/tests/conformance/cases.ts": "ef733800c8c71bf5ba01735f65ffb8cd02a06f210e7ec60866a95654fb550942",
+    "packages/html-next/tests/fixtures/plain-slot-ownership.ts": "cfa424d01ef2ec164541ebc69a3e553aa5898e520335e928fcd814faf8b7ac47",
+    "packages/html-next/tests/generate.test.ts": "fefb654f32a925a6ba378b8b4b75ed3e37a73a3f0e08a269de370ba6fe1ba4fa",
+    "packages/html-next/tests/parser.test.ts": "473f17234ce4adc8f3c2b4b6ee892eef43401089109ab9f162b3a17a4823b8ad",
+    "packages/html-next/tests/plain-slot-ownership.test.ts": "dbc0927cc148c5a6023622fc0f2f926d3184f002994cf324d0f1c349bf6e7f80",
+    "packages/html-next/tests/vanilla-blocks.test.ts": "8e559fbb70caf5e1fcf2b1db976ac1a27d574b953062b0352011758db15becdd"
+  }
+}

@@ -1,0 +1,574 @@
+{
+  "date": "2026-11-05",
+  "baseRevision": "cdaaa1ecc5963f1cc5d0175d388162aed2804125",
+  "nativeSourceSha256": "e51b504a50839be509fa5a9179f8108ecf7c7df8049ca257d23f9a5d8469dce6",
+  "baselineReceipt": "2026-11-05-native-slice.json",
+  "method": "Two sequential BenchmarkDotNet ShortRun sweeps, one launch and three measured iterations per case/method. Same validated templates, inputs and output as the original slice. Allocation attribution uses GC.GetAllocatedBytesForCurrentThread over 200 warm calls, observing binding completion at the first output write.",
+  "receipts": [
+    {
+      "name": "card",
+      "rows": 0,
+      "bytes": 75,
+      "compileOnceNs": 90147400,
+      "liquidParseOnceNs": 50195100,
+      "outputSha256": "35bde7a7db4efb9760819b971219e35b6fa276b9d8a9e784173184d788b68f6d",
+      "templateSha256": "d63428c5c873f732f089d7d262292c7784989ed531ef3766434fa368c76667fa",
+      "liquidSha256": "7c7ef7d35a1fc737293d91f3c4776ef9f1a10483bf62cd5e2cb16f4540a1c828",
+      "modelSha256": "645c51dbbe297f595345a0eab02a906e108c0b18609081ee200560d4f5ef1fcc",
+      "fluidVersion": "2.41.1.0",
+      "angleSharpVersion": "1.9.1.0",
+      "nativeAssemblySha256": "677dec535f5955c092586782f6d2bee63abaaf79fe3448ff9ae27282d5bf797d"
+    },
+    {
+      "name": "list-10",
+      "rows": 10,
+      "bytes": 589,
+      "compileOnceNs": 84386400,
+      "liquidParseOnceNs": 45638700,
+      "outputSha256": "fb48b479b07b9993530dded2dac571fff7999f41a34dfc7a3a4b769e930797bb",
+      "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+      "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+      "modelSha256": "97614a4243bfaebe2d05be8dab8df1f1a99251d249f22ae11aac821107a5a0b8",
+      "fluidVersion": "2.41.1.0",
+      "angleSharpVersion": "1.9.1.0",
+      "nativeAssemblySha256": "677dec535f5955c092586782f6d2bee63abaaf79fe3448ff9ae27282d5bf797d"
+    },
+    {
+      "name": "list-100",
+      "rows": 100,
+      "bytes": 5989,
+      "compileOnceNs": 119003900,
+      "liquidParseOnceNs": 65555300,
+      "outputSha256": "4c56e0194b5004fc2d16775df5d2e417686b9d7122df620c3ee85ee236585240",
+      "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+      "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+      "modelSha256": "e39a426097cace6a6bf2190e8a73466b2718df29aafe2f9d4b586ea152ed1a4f",
+      "fluidVersion": "2.41.1.0",
+      "angleSharpVersion": "1.9.1.0",
+      "nativeAssemblySha256": "677dec535f5955c092586782f6d2bee63abaaf79fe3448ff9ae27282d5bf797d"
+    },
+    {
+      "name": "list-1000",
+      "rows": 1000,
+      "bytes": 61789,
+      "compileOnceNs": 91693500,
+      "liquidParseOnceNs": 55295400,
+      "outputSha256": "9202f2e82e1d681907bb5a417734231b27968c5b33545cb0a08f747b9dfe25ce",
+      "templateSha256": "d7ff46cea5249de20a0316bacc5867bec38478bf3010837bd892f7ac2e4aa9c7",
+      "liquidSha256": "0198323800bd86d4c05149671297ed08864886123ed2429d0cb75519c86483b8",
+      "modelSha256": "7ced73a5e2bb2cd17aa428c7641c5a8ab445be27518662fc54d66f52fdd5f575",
+      "fluidVersion": "2.41.1.0",
+      "angleSharpVersion": "1.9.1.0",
+      "nativeAssemblySha256": "677dec535f5955c092586782f6d2bee63abaaf79fe3448ff9ae27282d5bf797d"
+    }
+  ],
+  "runs": [
+    {
+      "name": "initial",
+      "environment": {
+        "BenchmarkDotNetCaption": "BenchmarkDotNet",
+        "BenchmarkDotNetVersion": "0.15.8",
+        "OsVersion": "macOS 27.2 (26B123) [Darwin 27.2.0]",
+        "ProcessorName": "Apple M4 Pro",
+        "PhysicalProcessorCount": 1,
+        "PhysicalCoreCount": 14,
+        "LogicalCoreCount": 14,
+        "RuntimeVersion": ".NET 10.0.5 (10.0.5, 10.0.526.15411)",
+        "Architecture": "Arm64",
+        "HasAttachedDebugger": false,
+        "HasRyuJit": true,
+        "Configuration": "RELEASE",
+        "DotNetCliVersion": "10.0.201",
+        "ChronometerFrequency": {
+          "Hertz": 1000000000
+        },
+        "HardwareTimerKind": "Unknown"
+      },
+      "results": [
+        {
+          "case": "card",
+          "engine": "HtmlNext",
+          "meanNs": 196.20312571525574,
+          "medianNs": 201.3802924156189,
+          "samplesNs": [
+            181.77994084358215,
+            201.3802924156189,
+            205.44914388656616
+          ],
+          "stdDevNs": 12.655436952354222,
+          "ci999": {
+            "N": 3,
+            "Mean": 196.20312571525574,
+            "StandardError": 7.306619931154048,
+            "Level": 12,
+            "Margin": 230.88228103955603,
+            "Lower": -34.6791553243003,
+            "Upper": 427.08540675481174
+          },
+          "allocatedBytes": 240
+        },
+        {
+          "case": "card",
+          "engine": "Liquid",
+          "meanNs": 309.7989031473796,
+          "medianNs": 306.8323335647583,
+          "samplesNs": [
+            333.7075514793396,
+            306.8323335647583,
+            288.85682439804077
+          ],
+          "stdDevNs": 22.57204756433692,
+          "ci999": {
+            "N": 3,
+            "Mean": 309.7989031473796,
+            "StandardError": 13.031977737430958,
+            "Level": 12,
+            "Margin": 411.7981740976552,
+            "Lower": -101.99927095027562,
+            "Upper": 721.5970772450348
+          },
+          "allocatedBytes": 704
+        },
+        {
+          "case": "list-10",
+          "engine": "HtmlNext",
+          "meanNs": 1842.1628227233887,
+          "medianNs": 1821.3620223999023,
+          "samplesNs": [
+            1821.3620223999023,
+            1814.842384338379,
+            1890.2840614318848
+          ],
+          "stdDevNs": 41.80151470034744,
+          "ci999": {
+            "N": 3,
+            "Mean": 1842.1628227233887,
+            "StandardError": 24.134115764779693,
+            "Level": 12,
+            "Margin": 762.6152381194064,
+            "Lower": 1079.5475846039822,
+            "Upper": 2604.778060842795
+          },
+          "allocatedBytes": 1984
+        },
+        {
+          "case": "list-10",
+          "engine": "Liquid",
+          "meanNs": 3498.2666982014975,
+          "medianNs": 3272.6950645446777,
+          "samplesNs": [
+            3272.6950645446777,
+            3256.655376434326,
+            3965.4496536254883
+          ],
+          "stdDevNs": 404.6717846325468,
+          "ci999": {
+            "N": 3,
+            "Mean": 3498.2666982014975,
+            "StandardError": 233.63736379104716,
+            "Level": 12,
+            "Margin": 7382.719779654056,
+            "Lower": -3884.4530814525583,
+            "Upper": 10880.986477855553
+          },
+          "allocatedBytes": 4648
+        },
+        {
+          "case": "list-100",
+          "engine": "HtmlNext",
+          "meanNs": 21202.192108154297,
+          "medianNs": 21673.372924804688,
+          "samplesNs": [
+            21673.372924804688,
+            21738.269805908203,
+            20194.93359375
+          ],
+          "stdDevNs": 872.9147652687542,
+          "ci999": {
+            "N": 3,
+            "Mean": 21202.192108154297,
+            "StandardError": 503.97757470751424,
+            "Level": 12,
+            "Margin": 15925.21482404186,
+            "Lower": 5276.977284112438,
+            "Upper": 37127.40693219616
+          },
+          "allocatedBytes": 19264
+        },
+        {
+          "case": "list-100",
+          "engine": "Liquid",
+          "meanNs": 23407.960673014324,
+          "medianNs": 22857.817321777344,
+          "samplesNs": [
+            22857.817321777344,
+            22386.980682373047,
+            24979.084014892578
+          ],
+          "stdDevNs": 1380.8487251677518,
+          "ci999": {
+            "N": 3,
+            "Mean": 23407.960673014324,
+            "StandardError": 797.2333831857532,
+            "Level": 12,
+            "Margin": 25191.82108350565,
+            "Lower": -1783.8604104913247,
+            "Upper": 48599.78175651997
+          },
+          "allocatedBytes": 37770
+        },
+        {
+          "case": "list-1000",
+          "engine": "HtmlNext",
+          "meanNs": 269453.76912434894,
+          "medianNs": 261202.63696289062,
+          "samplesNs": [
+            248512.18627929688,
+            298646.4841308594,
+            261202.63696289062
+          ],
+          "stdDevNs": 26065.7407668895,
+          "ci999": {
+            "N": 3,
+            "Mean": 269453.76912434894,
+            "StandardError": 15049.062448390656,
+            "Level": 12,
+            "Margin": 475536.1437066522,
+            "Lower": -206082.37458230328,
+            "Upper": 744989.9128310012
+          },
+          "allocatedBytes": 195728
+        },
+        {
+          "case": "list-1000",
+          "engine": "Liquid",
+          "meanNs": 385349.6599121094,
+          "medianNs": 374253.1838378906,
+          "samplesNs": [
+            361405.3239746094,
+            374253.1838378906,
+            420390.4719238281
+          ],
+          "stdDevNs": 31018.716214522614,
+          "ci999": {
+            "N": 3,
+            "Mean": 385349.6599121094,
+            "StandardError": 17908.66415637124,
+            "Level": 12,
+            "Margin": 565896.8537783594,
+            "Lower": -180547.19386625,
+            "Upper": 951246.5136904687
+          },
+          "allocatedBytes": 502919
+        }
+      ]
+    },
+    {
+      "name": "confirmation",
+      "environment": {
+        "BenchmarkDotNetCaption": "BenchmarkDotNet",
+        "BenchmarkDotNetVersion": "0.15.8",
+        "OsVersion": "macOS 27.2 (26B123) [Darwin 27.2.0]",
+        "ProcessorName": "Apple M4 Pro",
+        "PhysicalProcessorCount": 1,
+        "PhysicalCoreCount": 14,
+        "LogicalCoreCount": 14,
+        "RuntimeVersion": ".NET 10.0.5 (10.0.5, 10.0.526.15411)",
+        "Architecture": "Arm64",
+        "HasAttachedDebugger": false,
+        "HasRyuJit": true,
+        "Configuration": "RELEASE",
+        "DotNetCliVersion": "10.0.201",
+        "ChronometerFrequency": {
+          "Hertz": 1000000000
+        },
+        "HardwareTimerKind": "Unknown"
+      },
+      "results": [
+        {
+          "case": "card",
+          "engine": "HtmlNext",
+          "meanNs": 216.3691471417745,
+          "medianNs": 219.72391510009766,
+          "samplesNs": [
+            219.72391510009766,
+            206.88738918304443,
+            222.4961371421814
+          ],
+          "stdDevNs": 8.327610957147877,
+          "ci999": {
+            "N": 3,
+            "Mean": 216.3691471417745,
+            "StandardError": 4.807948427815805,
+            "Level": 12,
+            "Margin": 151.92662415647635,
+            "Lower": 64.44252298529815,
+            "Upper": 368.2957712982509
+          },
+          "allocatedBytes": 240
+        },
+        {
+          "case": "card",
+          "engine": "Liquid",
+          "meanNs": 365.8954303264618,
+          "medianNs": 353.25036454200745,
+          "samplesNs": [
+            345.4179766178131,
+            353.25036454200745,
+            399.0179498195648
+          ],
+          "stdDevNs": 28.951037085517488,
+          "ci999": {
+            "N": 3,
+            "Mean": 365.8954303264618,
+            "StandardError": 16.71488905464236,
+            "Level": 12,
+            "Margin": 528.1746893394792,
+            "Lower": -162.2792590130174,
+            "Upper": 894.070119665941
+          },
+          "allocatedBytes": 704
+        },
+        {
+          "case": "list-10",
+          "engine": "HtmlNext",
+          "meanNs": 2640.379747390747,
+          "medianNs": 2731.6300106048584,
+          "samplesNs": [
+            2731.6300106048584,
+            2419.3731937408447,
+            2770.136037826538
+          ],
+          "stdDevNs": 192.36320100334825,
+          "ci999": {
+            "N": 3,
+            "Mean": 2640.379747390747,
+            "StandardError": 111.06094588146121,
+            "Level": 12,
+            "Margin": 3509.4208760181687,
+            "Lower": -869.0411286274216,
+            "Upper": 6149.800623408915
+          },
+          "allocatedBytes": 1984
+        },
+        {
+          "case": "list-10",
+          "engine": "Liquid",
+          "meanNs": 3441.326222101847,
+          "medianNs": 3470.7766399383545,
+          "samplesNs": [
+            3218.024969100952,
+            3470.7766399383545,
+            3635.1770572662354
+          ],
+          "stdDevNs": 210.1296302243515,
+          "ci999": {
+            "N": 3,
+            "Mean": 3441.326222101847,
+            "StandardError": 121.31839857474587,
+            "Level": 12,
+            "Margin": 3833.546682176919,
+            "Lower": -392.22046007507197,
+            "Upper": 7274.872904278766
+          },
+          "allocatedBytes": 4648
+        },
+        {
+          "case": "list-100",
+          "engine": "HtmlNext",
+          "meanNs": 24530.904551188152,
+          "medianNs": 25398.944854736328,
+          "samplesNs": [
+            25398.944854736328,
+            26106.90560913086,
+            22086.863189697266
+          ],
+          "stdDevNs": 2145.9976094929334,
+          "ci999": {
+            "N": 3,
+            "Mean": 24530.904551188152,
+            "StandardError": 1238.9922975210386,
+            "Level": 12,
+            "Margin": 39150.98507072826,
+            "Lower": -14620.080519540108,
+            "Upper": 63681.889621916416
+          },
+          "allocatedBytes": 19264
+        },
+        {
+          "case": "list-100",
+          "engine": "Liquid",
+          "meanNs": 29192.272588094074,
+          "medianNs": 28378.13819885254,
+          "samplesNs": [
+            28186.49543762207,
+            31012.184127807617,
+            28378.13819885254
+          ],
+          "stdDevNs": 1578.9997613267378,
+          "ci999": {
+            "N": 3,
+            "Mean": 29192.272588094074,
+            "StandardError": 911.6359372523469,
+            "Level": 12,
+            "Margin": 28806.833618511613,
+            "Lower": 385.43896958246114,
+            "Upper": 57999.10620660569
+          },
+          "allocatedBytes": 37770
+        },
+        {
+          "case": "list-1000",
+          "engine": "HtmlNext",
+          "meanNs": 282242.29256184894,
+          "medianNs": 285887.2780761719,
+          "samplesNs": [
+            272661.6921386719,
+            288177.9074707031,
+            285887.2780761719
+          ],
+          "stdDevNs": 8375.71931879336,
+          "ci999": {
+            "N": 3,
+            "Mean": 282242.29256184894,
+            "StandardError": 4835.723803362096,
+            "Level": 12,
+            "Margin": 152804.29976069316,
+            "Lower": 129437.99280115578,
+            "Upper": 435046.5923225421
+          },
+          "allocatedBytes": 195728
+        },
+        {
+          "case": "list-1000",
+          "engine": "Liquid",
+          "meanNs": 380137.7530110677,
+          "medianNs": 401545.5832519531,
+          "samplesNs": [
+            404933.1154785156,
+            401545.5832519531,
+            333934.5603027344
+          ],
+          "stdDevNs": 40048.97134732726,
+          "ci999": {
+            "N": 3,
+            "Mean": 380137.7530110677,
+            "StandardError": 23122.284388147003,
+            "Level": 12,
+            "Margin": 730642.3233564168,
+            "Lower": -350504.5703453491,
+            "Upper": 1110780.0763674844
+          },
+          "allocatedBytes": 502919
+        }
+      ]
+    }
+  ],
+  "allocationAttribution": {
+    "before": [
+      {
+        "name": "card",
+        "repetitions": 200,
+        "nativeTotalBytes": 848,
+        "fluidTotalBytes": 704,
+        "nativeBindingBytes": 64,
+        "nativeWriterBytes": 64,
+        "nativeOutputBufferAndStringBytes": 784,
+        "fluidWriterBytes": 464,
+        "fluidOutputBufferAndStringBytes": 240
+      },
+      {
+        "name": "list-10",
+        "repetitions": 200,
+        "nativeTotalBytes": 7120,
+        "fluidTotalBytes": 4648,
+        "nativeBindingBytes": 2984,
+        "nativeWriterBytes": 3304,
+        "nativeOutputBufferAndStringBytes": 3816,
+        "fluidWriterBytes": 3384,
+        "fluidOutputBufferAndStringBytes": 1264
+      },
+      {
+        "name": "list-100",
+        "repetitions": 200,
+        "nativeTotalBytes": 60256,
+        "fluidTotalBytes": 37773.04,
+        "nativeBindingBytes": 27888,
+        "nativeWriterBytes": 31088,
+        "nativeOutputBufferAndStringBytes": 29168,
+        "fluidWriterBytes": 25709.04,
+        "fluidOutputBufferAndStringBytes": 12064
+      },
+      {
+        "name": "list-1000",
+        "repetitions": 200,
+        "nativeTotalBytes": 557968,
+        "fluidTotalBytes": 502856.32,
+        "nativeBindingBytes": 272696,
+        "nativeWriterBytes": 304696,
+        "nativeOutputBufferAndStringBytes": 253272,
+        "fluidWriterBytes": 248921.64,
+        "fluidOutputBufferAndStringBytes": 253934.68
+      }
+    ],
+    "after": [
+      {
+        "name": "card",
+        "repetitions": 200,
+        "nativeTotalBytes": 240,
+        "fluidTotalBytes": 704,
+        "nativeBindingBytes": 64,
+        "nativeWriterBytes": 64,
+        "nativeOutputBufferAndStringBytes": 176,
+        "fluidWriterBytes": 464,
+        "fluidOutputBufferAndStringBytes": 240
+      },
+      {
+        "name": "list-10",
+        "repetitions": 200,
+        "nativeTotalBytes": 1984,
+        "fluidTotalBytes": 4648,
+        "nativeBindingBytes": 784,
+        "nativeWriterBytes": 784,
+        "nativeOutputBufferAndStringBytes": 1200,
+        "fluidWriterBytes": 3384,
+        "fluidOutputBufferAndStringBytes": 1264
+      },
+      {
+        "name": "list-100",
+        "repetitions": 200,
+        "nativeTotalBytes": 19264,
+        "fluidTotalBytes": 37770.52,
+        "nativeBindingBytes": 7264,
+        "nativeWriterBytes": 7264,
+        "nativeOutputBufferAndStringBytes": 12000,
+        "fluidWriterBytes": 25706.52,
+        "fluidOutputBufferAndStringBytes": 12063.999999999996
+      },
+      {
+        "name": "list-1000",
+        "repetitions": 200,
+        "nativeTotalBytes": 195664,
+        "fluidTotalBytes": 502856.32,
+        "nativeBindingBytes": 72064,
+        "nativeWriterBytes": 72064,
+        "nativeOutputBufferAndStringBytes": 123600,
+        "fluidWriterBytes": 248921.64,
+        "fluidOutputBufferAndStringBytes": 253934.68
+      }
+    ]
+  },
+  "changes": [
+    "Diagnostic paths compiled once.",
+    "Reference and JSON arrays normalized into one exact-size snapshot.",
+    "Existing finite double boxes reused.",
+    "Numbers formatted into stack spans.",
+    "String output counted over the bound snapshot and written into one exact-size string.",
+    "No retained output-buffer pools introduced."
+  ],
+  "limitations": [
+    "Allocated bytes are measured, not peak working set or retained heap.",
+    "ShortRun timing is noisy on this shared workstation; mean ordering is not a precise latency or throughput guarantee.",
+    "Current package remains the experimental inert rendering slice, without complete language support or browser hydration."
+  ]
+}

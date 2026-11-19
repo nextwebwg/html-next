@@ -20,6 +20,9 @@ it("typechecks recursive compositions, selected props and native attribute forwa
         <prop name="type" type="keyword" values="text, number" default="text">The native field mode.</prop>
         <prop name="value">The field’s current value.<type from="type"><option value="text" type="string"></option><option value="number" type="number"></option></type></prop>
         </defs><input from:type="$type" from:value="$value"></template>`,
+      "button.html": `<template component="x-button"><defs><prop name="kind" type="keyword" values="button, submit, reset" default="button">Type.</prop>
+        <prop name="orientation" type="keyword" values="horizontal, vertical" default="horizontal">Orientation.</prop><prop name="disabled" type="boolean">Disabled.</prop>
+        </defs><button from:type="$kind" from:aria-orientation="$orientation" from:disabled="$disabled">Action</button></template>`,
       "page.html": `<link rel="component" href="./leaf.html"><link rel="component" href="./field.html">
         <template component="x-page"><defs><prop name="label" type="string">An optional label.</prop><prop name="hidden" type="boolean">Optional native visibility.</prop>
         <state name="selected" type="boolean" value="false"></state>

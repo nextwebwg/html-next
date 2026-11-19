@@ -51,6 +51,8 @@ export interface ComponentHostOptions {
   readonly responders?: Readonly<Record<string, () => ((event: Event) => void) | undefined>>;
   /** Each named declared script, which a controller reads as \`host.scripts\`. */
   readonly scripts?: Readonly<Record<string, unknown>>;
+  /** For a child an \`as\` list holds, what its parent's \`<slot of>\` outlets render for each slot. */
+  readonly placed?: (name: string) => readonly Element[];
 }
 
 interface ControllerHost {
@@ -176,9 +178,11 @@ export function useComponentHost(loader: () => Promise<unknown>, options: Compon
         void membership;
         const current = host.root;
         const slot = name === "default" ? "" : name;
-        return Array.from(current.querySelectorAll("[data-slotted]"))
+        const own = Array.from(current.querySelectorAll("[data-slotted]"))
           .filter((element) => componentRoot(element.parentElement) === current &&
             (element.getAttribute("slot") ?? "") === slot);
+        const placed = options.placed?.(slot) ?? [];
+        return placed.length === 0 ? own : documentOrder([...own, ...placed]);
       },
       has: (_target, name) => typeof name === "string" && host.slots[name]!.length > 0,
     }),

@@ -25,7 +25,7 @@ const source = `<template component="x-counter" status="early" summary="Counter.
   <computed name="padded" from="$width + 2px"></computed>
   <event name="count-change" type="number"></event>
   <handler name="increment"><set name="count" expr:value="$count + 1"></set><set name="width" expr:value="'1rem'"></set><dispatch event="count-change" expr:value="$count"></dispatch></handler>
-</defs><button type="button" class="base" style="border-radius: 0; color: rgb(200, 10, 20) !important" class:active="$count > 0" class:invalid="min($width, 5px) = '4px'" class:from-object="{ value: min($width, 5px) }.value = '5px'" style:background-color="$count > 0 ? 'rgb(250, 220, 210)' : 'rgb(230, 240, 250)'" style:padding-left="min($width, 5px)" style:margin-left="$count >= 0 ? min($width, 5px) : '4px'" .title="min($width, 5px)" on:click.once="increment"
+</defs><button type="button" class="base" style="border-radius: 0; color: rgb(200, 10, 20) !important" class:active="$count > 0" class:invalid="min($width, 5px) = '4px'" class:from-object="{ value: min($width, 5px) }.value = '5px'" style:--_rows="$count + 1" style:background-color="$count > 0 ? 'rgb(250, 220, 210)' : 'rgb(230, 240, 250)'" style:padding-left="min($width, 5px)" style:margin-left="$count >= 0 ? min($width, 5px) : '4px'" .title="min($width, 5px)" on:click.once="increment"
   from:data-rounded="round($width)" from:data-minimum="min($width, 5px)" from:data-maximum="max(2, $count + 1)"
   from:data-clamped="clamp(0, $count, 10)" from:data-absolute="abs(-3)" from:data-defaulted="default(null, $count)"
   from:data-concatenated="concat('count:', $count)" from:data-joined="join(['a', 'b'], ',')" from:data-percent="round(25.5%)" from:data-nested="$count >= 0 ? min($width, 5px) : 'skip'" from:data-array="['x', min($width, 5px)]" from:data-numeric-array="[min(2, $count + 1), 3]" from:data-indexed="['x', min($width, 5px)][1]">
@@ -35,7 +35,7 @@ const source = `<template component="x-counter" status="early" summary="Counter.
 <style>:host { display: inline-block; appearance: none; border: 1px solid rgb(80, 80, 80); padding: 8px; color: rgb(30, 40, 50); } :host(:state(count)) { outline: 2px solid rgb(90, 70, 50); }</style>
 </template>`;
 
-async function snapshot(page: Page): Promise<{ readonly text: string; readonly padded: string | null; readonly classes: string; readonly background: string; readonly paddingLeft: string; readonly marginLeft: string; readonly invalidBranch: boolean; readonly matchText: string | null; readonly title: string; readonly color: string; readonly colorPriority: string; readonly hostState: string; readonly functions: Record<string, string | null>; readonly events: readonly number[]; readonly pixels: Buffer }> {
+async function snapshot(page: Page): Promise<{ readonly text: string; readonly padded: string | null; readonly classes: string; readonly background: string; readonly paddingLeft: string; readonly marginLeft: string; readonly invalidBranch: boolean; readonly matchText: string | null; readonly title: string; readonly color: string; readonly colorPriority: string; readonly customRows: string; readonly hostState: string; readonly functions: Record<string, string | null>; readonly events: readonly number[]; readonly pixels: Buffer }> {
   await page.waitForFunction(() => document.querySelector("button span")?.textContent !== undefined);
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   return {
@@ -50,6 +50,7 @@ async function snapshot(page: Page): Promise<{ readonly text: string; readonly p
     title: await page.locator("button").evaluate((button) => (button as HTMLButtonElement).title),
     color: await page.locator("button").evaluate((button) => getComputedStyle(button).color),
     colorPriority: await page.locator("button").evaluate((button) => button.style.getPropertyPriority("color")),
+    customRows: await page.locator("button").evaluate((button) => button.style.getPropertyValue("--_rows")),
     hostState: await page.locator("button").getAttribute("data-x-counter-state") ?? "",
     functions: await page.locator("button").evaluate((button) => Object.fromEntries([
       "rounded", "minimum", "maximum", "clamped", "absolute", "defaulted", "concatenated", "joined", "percent", "nested", "array", "numeric-array", "indexed",
@@ -182,6 +183,8 @@ else createRoot(mount).render(<XCounter />);`);
           assert.equal(converted.title, native.title);
           assert.equal(converted.color, native.color);
           assert.equal(converted.colorPriority, native.colorPriority);
+          assert.equal(native.customRows, expected === "0" ? "1" : "2");
+          assert.equal(converted.customRows, native.customRows);
           assert.equal(converted.hostState, native.hostState);
           assert.deepEqual(native.functions, {
             rounded: expected === "0" ? "9px" : "1rem",

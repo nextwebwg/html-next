@@ -1,7 +1,7 @@
 import { fail, type HtmlDiagnostic } from "./diagnostics.js";
 import { isResourceBuildMetadata } from "./resource-metadata.js";
 import type { ParsedComponentResource } from "./graph.js";
-import { parseComponentNodes, parseProjectedSlotContent } from "./parser.js";
+import { parseComponentNodes, parseProjectedSlotContent, type ComponentSourceNode } from "./parser.js";
 import type { ComponentDefinition } from "./template.js";
 
 const platforms = new WeakMap<Document, ReturnType<typeof browserPlatform>>();
@@ -21,6 +21,7 @@ function browserPlatform(root: Document) {
     return native;
   };
   return {
+    slotContent: (element: ComponentSourceNode) => (element as Element).innerHTML,
     isNativeElement,
     warnInvalidDeclaration(message: string, source: string) {
       root.defaultView?.console.warn(`${source}: HC013: ${message}`);
@@ -49,6 +50,15 @@ function browserPlatform(root: Document) {
   };
 }
 
+function platformFor(document: Document): ReturnType<typeof browserPlatform> {
+  let platform = platforms.get(document);
+  if (platform === undefined) {
+    platform = browserPlatform(document);
+    platforms.set(document, platform);
+  }
+  return platform;
+}
+
 /**
  * Reads a browser-parsed inert carrier directly through the shared component parser. The browser
  * has already normalized names, values, entities, and template contents.
@@ -61,12 +71,7 @@ export function parseBrowserComponent(
     fail("HS001", "A browser component carrier must be a <template component>.", source);
   }
   const document = carrier.ownerDocument;
-  let platform = platforms.get(document);
-  if (platform === undefined) {
-    platform = browserPlatform(document);
-    platforms.set(document, platform);
-  }
-  return parseComponentNodes([carrier], source, platform);
+  return parseComponentNodes([carrier], source, platformFor(document));
 }
 
 export function parseBrowserProjectedSlot(
@@ -75,12 +80,7 @@ export function parseBrowserProjectedSlot(
   names: readonly string[],
 ): readonly import("./template.js").TemplateNode[] {
   const document = template.ownerDocument;
-  let platform = platforms.get(document);
-  if (platform === undefined) {
-    platform = browserPlatform(document);
-    platforms.set(document, platform);
-  }
-  return parseProjectedSlotContent(template, definition, names, document.URL, platform);
+  return parseProjectedSlotContent(template, definition, names, document.URL, platformFor(document));
 }
 
 /** Parses a fetched component resource with the browser's inert HTML fragment parser. */
@@ -121,7 +121,8 @@ export function parseBrowserComponentResource(
     }
     dependencies.push(href);
   }
-  const definitions = Object.freeze(carriers.map((carrier) => parseBrowserComponent(carrier, source)));
+  const platform = platformFor(root);
+  const definitions = Object.freeze(carriers.map((carrier) => parseComponentNodes([carrier], source, platform)));
   return Object.freeze({
     definition: definitions[0]!,
     definitions,

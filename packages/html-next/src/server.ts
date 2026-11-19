@@ -30,6 +30,8 @@ export interface ServerRenderOptions {
   readonly url?: string;
   /** Typed caller inputs, keyed by selectors for authored component invocations. */
   readonly props?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** Application output attributes on lowered roots, keyed by authored invocation selectors. */
+  readonly rootAttributes?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /** Declared initial state, keyed by a selector for rendered component roots. */
   readonly state?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** The application document's own head content, which the components' head declarations start from. */

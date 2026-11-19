@@ -1,0 +1,260 @@
+{
+  "scope": "Deferred native component carriers and waiting-input literal retention. This is a verified correctness unit toward the full renderer goal, not a ship-ready claim.",
+  "base": "3450717240209294055ed065181a322e59c1b35c",
+  "startingCheckpoint": "292b899cfd0e9d7865749a8518119d0992a96c61",
+  "sourceHashes": {
+    "CHANGELOG.md": "e1aec02d3f71ec75013ff3fd9a3100da8d65bba9db5c911050371cfc861ed9bd",
+    "packages/html-next-dotnet/README.md": "76d2613834c34d472c38a064fa20dd5247bae0176fd8ff6dfd90641e69c90bcb",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "9848c22dd0a1d3df48d83266b23caa2a03e4f772c5aa1dcda25f1f2f05d68d57",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentCall.cs": "b803ff3aedad45c97c83a0d952a14ba1c7bf8c9d8b0beee51eeeba0b0b66e98c",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "50d8aa02658b1379da10b664ae0a100626087fc5a2723a6a470e40db23e839ef",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/CompositionTests.cs": "abc056410af3241872951a9714b062af7aafb405b2794d6a95566af110c34223",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/DeferredComponentTests.cs": "8f7725a9b28587dc22cc7f54c6bab232240c6dcf74ee662d8de9c4dff5e3a537",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HtmlNext.Tests.csproj": "e12f4dbcb6213c77a39f6c96b736601418122fbf8fbee3f589819d32902776d0",
+    "packages/html-next-dotnet/tests/fixtures/deferred-components.json": "b06630c7b6a2c05cf06f107253a2136ce766ceeae37276e257f30e21d40a38b9",
+    "packages/html-next-dotnet/tests/fixtures/invocation-props.json": "24636ddcc7d99419b12fb493b1dea03ecf3b198644daa5108bace522759e1f3f",
+    "packages/html-next/tests/native-deferred-components.test.ts": "563b03a3072d080c4325c29dc5d2748f6e1d8b0e429f06e88ffb79b1a841c13a",
+    "packages/html-next/tests/server-visible-html.ts": "769f15e7f0dad97f951f0ad3fef364780840797bf721eaa9dbe8a34593b0625e"
+  },
+  "nodeControlCases": 42,
+  "browser": {
+    "scenarios": 252,
+    "engines": [
+      "Chromium",
+      "Firefox",
+      "WebKit"
+    ],
+    "scope": "Actual native Render/Write and Node output compared against independent visible/carrier HTML expectations. No native hydration qualification.",
+    "environment": "Firefox used separate MOZ_APP_DATA and MOZ_LOCAL_APP_DATA directories to avoid the host application-data lookup failure."
+  },
+  "redToGreen": {
+    "nativeCases": [
+      "pending-state",
+      "pending-computed"
+    ],
+    "before": "Two native failures; matching Node controls pass.",
+    "after": "Both pass with independent null, available-missing-field, default(), unread branch, alias, consecutive binding and typed-row controls."
+  },
+  "allocations": {
+    "baseline": "3450717240209294055ed065181a322e59c1b35c",
+    "repetitions": 1000,
+    "warmup": 1000,
+    "scope": "Warmed thread allocations including complete output. Changed outputs prevent equivalent-work speed comparisons. No retained, RSS, peak or timing claim.",
+    "rows": [
+      {
+        "name": "static-prop",
+        "beforeBytes": 664,
+        "afterBytes": 664,
+        "outputCharactersBefore": 103,
+        "outputCharactersAfter": 103
+      },
+      {
+        "name": "bound-prop",
+        "beforeBytes": 672,
+        "afterBytes": 664,
+        "outputCharactersBefore": 109,
+        "outputCharactersAfter": 103
+      },
+      {
+        "name": "native-bound-text",
+        "beforeBytes": 680,
+        "afterBytes": 656,
+        "outputCharactersBefore": 112,
+        "outputCharactersAfter": 101
+      },
+      {
+        "name": "native-bound-attribute",
+        "beforeBytes": 696,
+        "afterBytes": 688,
+        "outputCharactersBefore": 121,
+        "outputCharactersAfter": 115
+      },
+      {
+        "name": "conditional",
+        "beforeBytes": 688,
+        "afterBytes": 632,
+        "outputCharactersBefore": 114,
+        "outputCharactersAfter": 89
+      },
+      {
+        "name": "loop",
+        "beforeBytes": 712,
+        "afterBytes": 672,
+        "outputCharactersBefore": 124,
+        "outputCharactersAfter": 105
+      },
+      {
+        "name": "fragment",
+        "beforeBytes": 704,
+        "afterBytes": 656,
+        "outputCharactersBefore": 122,
+        "outputCharactersAfter": 101
+      },
+      {
+        "name": "lazy",
+        "beforeBytes": 776,
+        "afterBytes": 776,
+        "outputCharactersBefore": 158,
+        "outputCharactersAfter": 158
+      },
+      {
+        "name": "forwarding",
+        "beforeBytes": 688,
+        "afterBytes": 736,
+        "outputCharactersBefore": 117,
+        "outputCharactersAfter": 140
+      },
+      {
+        "name": "nested-component",
+        "beforeBytes": 696,
+        "afterBytes": 696,
+        "outputCharactersBefore": 120,
+        "outputCharactersAfter": 120
+      },
+      {
+        "name": "null-input",
+        "beforeBytes": 664,
+        "afterBytes": 624,
+        "outputCharactersBefore": 107,
+        "outputCharactersAfter": 89
+      },
+      {
+        "name": "absent-input",
+        "beforeBytes": 760,
+        "afterBytes": 704,
+        "outputCharactersBefore": 117,
+        "outputCharactersAfter": 89
+      },
+      {
+        "name": "invalid-numeric-input",
+        "beforeBytes": 664,
+        "afterBytes": 624,
+        "outputCharactersBefore": 108,
+        "outputCharactersAfter": 89
+      },
+      {
+        "name": "wrong-unknown-input",
+        "beforeBytes": 672,
+        "afterBytes": 632,
+        "outputCharactersBefore": 109,
+        "outputCharactersAfter": 89
+      },
+      {
+        "name": "valid-unknown-input",
+        "beforeBytes": 800,
+        "afterBytes": 784,
+        "outputCharactersBefore": 109,
+        "outputCharactersAfter": 99
+      },
+      {
+        "name": "list-input",
+        "beforeBytes": 712,
+        "afterBytes": 696,
+        "outputCharactersBefore": 109,
+        "outputCharactersAfter": 101
+      },
+      {
+        "name": "object-input",
+        "beforeBytes": 704,
+        "afterBytes": 664,
+        "outputCharactersBefore": 109,
+        "outputCharactersAfter": 89
+      },
+      {
+        "name": "boolean-false",
+        "beforeBytes": 664,
+        "afterBytes": 624,
+        "outputCharactersBefore": 108,
+        "outputCharactersAfter": 89
+      },
+      {
+        "name": "boolean-true",
+        "beforeBytes": 664,
+        "afterBytes": 648,
+        "outputCharactersBefore": 107,
+        "outputCharactersAfter": 98
+      }
+    ]
+  },
+  "verification": {
+    "status": "passed",
+    "command": "CHOKIDAR_USEPOLLING=1 PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+    "initialInner": "Failed: 1831 JS passes, 3 failures and 4637 gated skips in 862.59s. Angular needed built package declarations; both Angular cases passed after build. HTMLKit watcher case reproduced without polling and passed with CHOKIDAR_USEPOLLING=1. JS suite approached the 15-minute per-check limit.",
+    "javascript": {
+      "passed": 1834,
+      "skipped": 4637,
+      "filesPassed": 108,
+      "filesSkipped": 134,
+      "durationSeconds": 676.9
+    },
+    "native": {
+      "passed": 547,
+      "skipped": 0,
+      "validatedFluidOutputs": 5
+    },
+    "packedConsumers": {
+      "passed": 8,
+      "durationSeconds": 100.92
+    },
+    "other": "Lint, types, generated artifacts, runtime size, package build and packed consumers passed.",
+    "limits": "Browser and target suites are gated out of verify:pr. The separate 252 browser comparisons verify output only, not native hydration. No full catalog behavior/hydration gate or speed benchmark was completed.",
+    "machineLocalLog": ".context/deferred-verify-pr.log"
+  },
+  "review": {
+    "scope": "Changes from 34507172 through the reviewed working tree",
+    "agents": 1,
+    "crossModel": false,
+    "actionableCodeFindings": 0,
+    "limitations": "Bounded inline correctness review under the owner single-agent/light-review guidance; full renderer remains incomplete.",
+    "verification": "Full verify:pr subsequently passed without further implementation edits."
+  },
+  "remaining": [
+    "Complete native semantics, preparation and standalone CSS/Intl compatibility",
+    "Consume deployed client assets and emit interoperable identity/rendered-form records",
+    "Qualify actual native hydration and the complete refreshed catalog across all targets and three engines",
+    "Validate Fluid/Node speed, throughput, cold/warm and allocated/retained/peak memory workloads",
+    "Complete full-project review and protected release-readiness work; preserve private/non-publishing metadata"
+  ],
+  "coreAllocations": [
+    {
+      "name": "card",
+      "repetitions": 200,
+      "nativeTotalBytes": 240,
+      "nativeBindingBytes": 64,
+      "nativeWriterBytes": 64,
+      "nativeOutputBufferAndStringBytes": 176
+    },
+    {
+      "name": "list-10",
+      "repetitions": 200,
+      "nativeTotalBytes": 1984,
+      "nativeBindingBytes": 784,
+      "nativeWriterBytes": 784,
+      "nativeOutputBufferAndStringBytes": 1200
+    },
+    {
+      "name": "list-100",
+      "repetitions": 200,
+      "nativeTotalBytes": 19264,
+      "nativeBindingBytes": 7264,
+      "nativeWriterBytes": 7264,
+      "nativeOutputBufferAndStringBytes": 12000
+    },
+    {
+      "name": "list-1000",
+      "repetitions": 200,
+      "nativeTotalBytes": 195664,
+      "nativeBindingBytes": 72064,
+      "nativeWriterBytes": 72064,
+      "nativeOutputBufferAndStringBytes": 123600
+    },
+    {
+      "name": "cart-100",
+      "repetitions": 200,
+      "nativeTotalBytes": 19072,
+      "nativeBindingBytes": 10592,
+      "nativeWriterBytes": 10592,
+      "nativeOutputBufferAndStringBytes": 8480
+    }
+  ]
+}

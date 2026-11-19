@@ -1,0 +1,227 @@
+using System.Collections.Frozen;
+using System.Security.Cryptography;
+using System.Text;
+using AngleSharp.Dom;
+using AngleSharp.Html.Dom;
+using AngleSharp.Html.Parser;
+
+namespace HtmlNext;
+
+/// <summary>Application-resolved source. Id is its canonical identity; Revision is application-owned.</summary>
+public sealed record HtmlNextSource(string Id, string Content, string? Revision = null);
+
+/// <summary>Resolves an authored reference relative to its importing source, or an application entry.</summary>
+public delegate ValueTask<HtmlNextSource> HtmlNextSourceResolver(string specifier, string? referrer, CancellationToken cancellationToken);
+
+public sealed record HtmlNextModuleReference(string Component, string SourceId, string Specifier);
+
+public sealed record CompiledSource(string Id, string? Revision, string Sha256, IReadOnlyList<string> Dependencies);
+
+/// <summary>An immutable compiled source graph. Retain its templates across requests.</summary>
+public sealed class CompiledComponentGraph
+{
+    private readonly FrozenDictionary<string, ComponentReference> contracts;
+    internal HtmlNextServerAssets? Assets { get; }
+
+    internal CompiledComponentGraph(Dictionary<string, ComponentReference> references, CompiledSource[] sources, HtmlNextServerAssets? assets)
+    {
+        contracts = references.ToFrozenDictionary(pair => pair.Key, pair => pair.Value.Copy(), StringComparer.Ordinal);
+        Templates = references.ToFrozenDictionary(pair => pair.Key, pair => pair.Value.Template, StringComparer.Ordinal);
+        Assets = assets;
+        Sources = Array.AsReadOnly(sources);
+        Stylesheets = assets?.Stylesheets ?? Array.Empty<string>();
+        Client = assets?.Client;
+        Modules = Array.AsReadOnly(Templates.Values.Select(template => template.Module).OfType<HtmlNextModuleReference>().OrderBy(module => module.Component, StringComparer.Ordinal).ToArray());
+    }
+
+    public IReadOnlyDictionary<string, CompiledTemplate> Templates { get; }
+    public IReadOnlyList<CompiledSource> Sources { get; }
+    public IReadOnlyList<string> Stylesheets { get; }
+    public HtmlNextClientPlan? Client { get; }
+    public IReadOnlyList<HtmlNextModuleReference> Modules { get; }
+    public CompiledTemplate Template(string tag) => Templates.TryGetValue(tag, out var template) ? template
+        : throw new KeyNotFoundException($"No component '{tag}' is defined in this graph.");
+
+    /// <summary>Compiles one server-owned application carrier against this retained library.</summary>
+    public CompiledTemplate CompileApplication(string source, string sourceName = "<application>") =>
+        HtmlNextCompiler.CompileApplication(source, sourceName, this, contracts.ToDictionary(pair => pair.Key, pair => pair.Value.Copy(), StringComparer.Ordinal));
+}
+
+internal sealed class ComponentReference
+{
+    internal static readonly IReadOnlyDictionary<string, ScopedSlotContract> EmptySlots = new Dictionary<string, ScopedSlotContract>();
+    public IReadOnlyDictionary<string, ScopedSlotContract> Slots { get; set; } = EmptySlots;
+    public Prop[] Props { get; set; } = [];
+    public ValueType? EntryType { get; set; }
+    public string? DelegatedTag { get; init; }
+    public bool ForwardsAttributes { get; init; }
+    public CompiledTemplate Template { get; set; } = null!;
+    public ComponentReference Copy() => new()
+    {
+        Slots = Slots, Props = Props, EntryType = EntryType, DelegatedTag = DelegatedTag,
+        ForwardsAttributes = ForwardsAttributes, Template = Template
+    };
+}
+
+public static partial class HtmlNextCompiler
+{
+    internal static CompiledTemplate CompileApplication(string source, string sourceName, CompiledComponentGraph library, Dictionary<string, ComponentReference> references)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        using var resource = ReadResource(new(sourceName, source));
+        if (resource.References.Length != 0) throw ValueType.Error(sourceName, "Application components use the retained library's resolved dependencies.");
+        if (resource.Carriers.Length != 1) throw ValueType.Error(sourceName, "An application requires one component carrier.");
+        var compiler = new Compiler(resource.Carriers[0], sourceName, references, null, "", library.Assets);
+        compiler.ReadContract();
+        var reference = new ComponentReference { Props = compiler.Props, Slots = compiler.Slots, DelegatedTag = compiler.DelegatedTag, ForwardsAttributes = compiler.ForwardsAttributes };
+        if (!references.TryAdd(compiler.Tag, reference)) throw ValueType.Error(sourceName, $"Duplicate component '{compiler.Tag}'.");
+        compiler.BindChildListTypes();
+        reference.Template = compiler.Compile();
+        foreach (var item in references.Values) { item.Props = []; item.Slots = ComponentReference.EmptySlots; }
+        return reference.Template;
+    }
+
+    /// <summary>Compiles all carriers in one resource without resolving external dependencies.</summary>
+    public static CompiledComponentGraph CompileResource(string source, string sourceName = "<source>", HtmlNextServerAssets? assets = null)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        using var resource = ReadResource(new(sourceName, source));
+        if (resource.References.Length != 0) throw ValueType.Error(sourceName, "Component dependency links require CompileAsync and an application resolver.");
+        return Link([resource], default, assets);
+    }
+
+    /// <summary>Loads and compiles the complete declared graph. Rendering never calls the resolver.</summary>
+    public static async ValueTask<CompiledComponentGraph> CompileAsync(IEnumerable<string> entries, HtmlNextSourceResolver resolver, CancellationToken cancellationToken = default, HtmlNextServerAssets? assets = null)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(resolver);
+        var resources = new Dictionary<string, SourceResource>(StringComparer.Ordinal);
+        var requests = new Dictionary<(string? Referrer, string Specifier), string>();
+        try
+        {
+            foreach (var entry in entries) await Load(entry, null).ConfigureAwait(false);
+            if (resources.Count == 0) throw ValueType.Error("<entries>", "At least one component source entry is required.");
+            cancellationToken.ThrowIfCancellationRequested();
+            return Link(resources.Values, cancellationToken, assets);
+        }
+        finally { foreach (var resource in resources.Values) resource.Dispose(); }
+
+        async ValueTask<string> Load(string specifier, string? referrer)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ExecutionStack.Check(referrer ?? specifier);
+            if (string.IsNullOrWhiteSpace(specifier)) throw ValueType.Error(referrer ?? "<entries>", "A source reference cannot be empty.");
+            if (requests.TryGetValue((referrer, specifier), out var known)) return known;
+            HtmlNextSource resolved;
+            try { resolved = await resolver(specifier, referrer, cancellationToken).ConfigureAwait(false); }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                throw new HtmlNextException("HNCS005", $"Resolving component source '{specifier}' failed.", referrer ?? specifier, error);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (resolved is null || string.IsNullOrWhiteSpace(resolved.Id) || resolved.Content is null)
+                throw ValueType.Error(referrer ?? specifier, "The source resolver must return a canonical identity and content.");
+            requests.Add((referrer, specifier), resolved.Id);
+            if (resources.TryGetValue(resolved.Id, out var existing))
+            {
+                if (existing.Source.Content != resolved.Content || existing.Source.Revision != resolved.Revision)
+                    throw ValueType.Error(resolved.Id, "One canonical source identity resolved to conflicting content or revisions.");
+                return resolved.Id;
+            }
+            var resource = ReadResource(resolved);
+            resources.Add(resolved.Id, resource);
+            foreach (var dependency in resource.References)
+            {
+                var id = await Load(dependency, resolved.Id).ConfigureAwait(false);
+                if (!resource.Dependencies.Contains(id, StringComparer.Ordinal)) resource.Dependencies.Add(id);
+            }
+            return resolved.Id;
+        }
+    }
+
+    private static CompiledComponentGraph Link(IEnumerable<SourceResource> resources, CancellationToken cancellation, HtmlNextServerAssets? assets)
+    {
+        var references = new Dictionary<string, ComponentReference>(StringComparer.Ordinal);
+        var compilers = new List<(Compiler Compiler, ComponentReference Reference)>();
+        var sources = new List<CompiledSource>();
+        foreach (var resource in resources)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(resource.Source.Content)));
+            foreach (var carrier in resource.Carriers)
+            {
+                var compiler = new Compiler(carrier, resource.Source.Id, references, assets, hash);
+                compiler.ReadContract();
+                var reference = new ComponentReference { Props = compiler.Props, Slots = compiler.Slots, DelegatedTag = compiler.DelegatedTag, ForwardsAttributes = compiler.ForwardsAttributes };
+                if (!references.TryAdd(compiler.Tag, reference)) throw ValueType.Error(resource.Source.Id, $"Duplicate component '{compiler.Tag}'.");
+                compilers.Add((compiler, reference));
+            }
+            sources.Add(new(resource.Source.Id, resource.Source.Revision,
+                hash,
+                Array.AsReadOnly(resource.Dependencies.ToArray())));
+        }
+        foreach (var (compiler, _) in compilers) compiler.BindChildListTypes();
+        foreach (var (compiler, reference) in compilers)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            reference.Template = compiler.Compile();
+        }
+        var graph = new CompiledComponentGraph(references, sources.ToArray(), assets);
+        foreach (var reference in references.Values) { reference.Props = []; reference.Slots = ComponentReference.EmptySlots; }
+        return graph;
+    }
+
+    private sealed class SourceResource(HtmlNextSource source, IDocument document, IHtmlTemplateElement[] carriers, string[] references) : IDisposable
+    {
+        public HtmlNextSource Source { get; } = source;
+        public IHtmlTemplateElement[] Carriers { get; } = carriers;
+        public string[] References { get; } = references;
+        public List<string> Dependencies { get; } = [];
+        public void Dispose() => document.Dispose();
+    }
+
+    private static SourceResource ReadResource(HtmlNextSource source)
+    {
+        var parser = new HtmlParser();
+        var document = parser.ParseDocument("");
+        try
+        {
+            var carriers = new List<IHtmlTemplateElement>();
+            var dependencies = new List<string>();
+            foreach (var node in ParseSourceFragment(source.Content, document, source.Id).Where(Significant))
+            {
+                if (node is IHtmlTemplateElement carrier && carrier.HasAttribute("component")) { carriers.Add(carrier); continue; }
+                if (node is IElement { LocalName: "link" } link && Rel(link, "component") && !Rel(link, "import"))
+                {
+                    RejectExecutableAttributes(link, source.Id);
+                    var href = link.GetAttribute("href");
+                    if (string.IsNullOrWhiteSpace(href)) throw ValueType.Error(source.Id, "A component dependency requires a nonempty href.");
+                    if (!dependencies.Contains(href, StringComparer.Ordinal)) dependencies.Add(href);
+                    continue;
+                }
+                if (node is IElement metadata && Metadata(metadata, source.Id)) continue;
+                throw ValueType.Error(source.Id, "Invalid component resource content; expected component carriers, dependency links or inert metadata.");
+            }
+            if (carriers.Count == 0) throw ValueType.Error(source.Id, "A component resource requires at least one <template component>.");
+            return new(source, document, carriers.ToArray(), dependencies.ToArray());
+        }
+        catch { document.Dispose(); throw; }
+    }
+
+    private static bool Rel(IElement element, string value) => (element.GetAttribute("rel") ?? "")
+        .Split([' ', '\t', '\n', '\r', '\f'], StringSplitOptions.RemoveEmptyEntries).Contains(value, StringComparer.OrdinalIgnoreCase);
+
+    private static bool Metadata(IElement element, string source)
+    {
+        var allowed = element.LocalName == "title" || element.LocalName == "meta" && !element.HasAttribute("http-equiv")
+            || element.LocalName == "link" && !Rel(element, "component") && !Rel(element, "import");
+        if (allowed) RejectExecutableAttributes(element, source);
+        return allowed;
+    }
+
+    private static void RejectExecutableAttributes(IElement element, string source)
+    {
+        foreach (var attribute in element.Attributes)
+            if (attribute.Name.StartsWith("on", StringComparison.OrdinalIgnoreCase)) throw ValueType.Error(source, "Executable event attributes are invalid in component metadata or dependency links.");
+    }
+}

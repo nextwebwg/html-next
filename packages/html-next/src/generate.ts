@@ -15,6 +15,7 @@ import { reactContextArtifact as makeReactContextArtifact } from "./targets/reac
 import { reactDepthArtifact as makeReactDepthArtifact } from "./targets/react-depth.js";
 import { reactRenderArtifact as makeReactRenderArtifact } from "./targets/react-render.js";
 import { reactPropsArtifact as makeReactPropsArtifact } from "./targets/react-props.js";
+import { inlineStyleArtifacts as makeInlineStyleArtifacts } from "./targets/inline-style.js";
 import { svelteDecorationsArtifact as makeSvelteDecorationsArtifact, svelteStyleArtifacts as makeSvelteStyleArtifacts } from "./targets/svelte-decorations.js";
 import { svelteConnectionArtifact as makeSvelteConnectionArtifact } from "./targets/svelte-connection.js";
 import { svelteHostArtifact as makeSvelteHostArtifact } from "./targets/svelte-host.js";
@@ -25,6 +26,7 @@ import { sveltePropsArtifact as makeSveltePropsArtifact } from "./targets/svelte
 import { svelteControlArtifact as makeSvelteControlArtifact } from "./targets/svelte-control.js";
 import { svelteEventsArtifact as makeSvelteEventsArtifact } from "./targets/svelte-events.js";
 import { svelteHtmlArtifact as makeSvelteHtmlArtifact } from "./targets/svelte-html.js";
+import { svelteContextArtifact as makeSvelteContextArtifact } from "./targets/svelte-context.js";
 import { VUE_HOST_PATH, vueHostModule } from "./targets/vue-host.js";
 import { VUE_HTML_PATH, vueHtmlModule } from "./targets/vue-html.js";
 import { VUE_CONTROL_PATH, vueControlModule } from "./targets/vue-control.js";
@@ -34,11 +36,11 @@ export { importsVueBindings } from "./targets/vue-bindings.js";
 import { requestsArtifact as makeRequestsArtifact } from "./targets/request-host-source.js";
 import { headHelperArtifact as makeHeadArtifact } from "./targets/head-target.js";
 import { HtmlDiagnosticError } from "./diagnostics.js";
-import type { ComponentDefinition } from "./template.js";
+import type { ComponentDefinition, SlotContract } from "./template.js";
 import { compileComponentStylesForBuild, compileComponentGraphStylesForBuild } from "./component-styles-build.js";
 import { wrapStylesheetConditions } from "./stylesheet-resources.js";
 
-export const GENERATOR_VERSION = "1.0.0-alpha.86";
+export const GENERATOR_VERSION = "1.0.0-alpha.95";
 
 export interface GeneratedArtifact {
   readonly path: string;
@@ -69,6 +71,12 @@ export interface GenerationOptions {
   /** Bound native creation depth when the invocation graph contains recursive edges. */
   readonly guardNestedDepth?: boolean;
   /**
+   * The Vanilla module also records what its template writes on its root, so that evaluating a
+   * changed module carries over only the attributes each replaced root received from outside its
+   * template. A development server enables it.
+   */
+  readonly hot?: boolean;
+  /**
    * A bundler's module specifier for a declared script whose `src` is relative to the definition,
    * whose default export is the script's emitted or served URL, such as Vite's `?url` import.
    * Without one, a relative `src` resolves against the generated module's URL at runtime.
@@ -89,6 +97,18 @@ export interface Invoked {
   readonly definition: ComponentDefinition;
 }
 
+/**
+ * A component's slots for a framework target: its outlets, which carry their declarations' `accepts`
+ * and `as`, then each slot declared with `accepts` that no outlet renders, as its list alone reads it.
+ */
+function slotContracts(definition: ComponentDefinition): readonly SlotContract[] {
+  const outlets = definition.slots ?? [];
+  const listed = Object.entries(definition.contract.slots ?? {}).filter(([name, slot]) =>
+    slot.accepts !== undefined && !outlets.some((outlet) => (outlet.name ?? "") === name));
+  return listed.length === 0 ? outlets : [...outlets, ...listed.map(([name, slot]) =>
+    ({ ...name === "" ? {} : { name }, required: false, accepts: slot.accepts!, ...slot.as === undefined ? {} : { as: slot.as } }))];
+}
+
 export function generateComponent(
   definition: ComponentDefinition,
   options?: GenerationOptions,
@@ -98,9 +118,9 @@ export function generateComponent(
     [definition.contract.tag, definition] as const,
   ]);
   const vanilla = generateVanilla(definition, GENERATOR_VERSION, options?.noContextReaders === true, options?.invocations,
-    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL, graph, options?.guardNestedDepth === true, options?.modulePreparation);
+    options?.extensions?.includes(TRANSITIONS_EXTENSION) === true, options?.hydrate === true, options?.scriptURL, graph, options?.guardNestedDepth === true, options?.modulePreparation, options?.hot === true);
   const vue = convertedToVue(definition, {
-    slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.slots ?? []] as const)),
+    slotsByTag: new Map([...graph].map(([tag, invoked]) => [tag, slotContracts(invoked)] as const)),
     propContractsByTag: new Map([...graph].map(([tag, invoked]) => [tag, invoked.contract.props] as const)),
     componentGraph: graph,
     ...(options?.modulePreparation === undefined ? {} : { modulePreparation: options.modulePreparation }),
@@ -174,6 +194,10 @@ export function svelteDecorationsArtifact(): GeneratedArtifact {
   return makeSvelteDecorationsArtifact(GENERATOR_VERSION);
 }
 
+export function inlineStyleArtifacts(target: "react" | "preact" | "svelte" | "vue" | "angular"): readonly GeneratedArtifact[] {
+  return makeInlineStyleArtifacts(target, GENERATOR_VERSION);
+}
+
 export function svelteStyleArtifacts(): readonly GeneratedArtifact[] {
   return makeSvelteStyleArtifacts(GENERATOR_VERSION);
 }
@@ -197,6 +221,11 @@ export function svelteDataArtifact(): GeneratedArtifact {
 /** The rendering helpers converted Svelte components share; every package that emits Svelte ships it once. */
 export function svelteRenderArtifact(): GeneratedArtifact {
   return makeSvelteRenderArtifact(GENERATOR_VERSION);
+}
+
+/** The component `<slot of>` outlets render a child's slot content in, with the child's contexts. */
+export function svelteContextArtifact(): GeneratedArtifact {
+  return makeSvelteContextArtifact(GENERATOR_VERSION);
 }
 
 export function sveltePropsArtifact(): GeneratedArtifact {

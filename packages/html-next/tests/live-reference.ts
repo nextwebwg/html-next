@@ -53,19 +53,17 @@ export function liveReference(definition: ComponentDefinition, others: readonly 
     // A root `$match` starts on the arm the props choose, as the general runtime's factories chose it.
     root === "template" ? "  const arm = definition.template.children[componentRootIndex(definition, props)], element = document.createElement(arm.name);"
       : root === "svg" ? '  const element = document.createElementNS("http://www.w3.org/2000/svg", "svg");' : `  const element = document.createElement(${JSON.stringify(root)});`,
-    "  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value));",
-    // Then the root's literals, as generated factories merge them: class and style combine, else the factory's win.
+    // The attachment receives logical invocation attributes separately from the rendered root.
     `  const node = ${root === "template" ? "arm" : "definition.template"};`,
     "  for (const attribute of node.attributes) {",
     "    if (attribute.kind !== \"literal\") continue;",
-    "    if (attribute.name === \"class\" || attribute.name === \"style\") element.setAttribute(attribute.name, [attribute.value, element.getAttribute(attribute.name)].filter(Boolean).join(attribute.name === \"class\" ? \" \" : \"; \"));",
-    "    else if (!element.hasAttribute(attribute.name)) element.setAttribute(attribute.name, attribute.value);",
+    "    element.setAttribute(attribute.name, attribute.value);",
     "  }",
     `  element.setAttribute("component", ${JSON.stringify(definition.contract.tag)});`,
     // A factory's children and named slots, as the general runtime's factories projected them.
     "  const projected = [];",
     "  for (const [name, nodes] of [[\"\", children], ...Object.entries(slots)]) for (const child of nodes) projected.push([typeof child === \"string\" ? document.createTextNode(child) : child, name]);",
-    `  manageComponentLifecycle(element, definition, { props, projected${controlled ? ", controller" : ""} });`,
+    `  manageComponentLifecycle(element, definition, { props, attributes, projected${controlled ? ", controller" : ""} });`,
     "  return element;",
     "}",
     ],

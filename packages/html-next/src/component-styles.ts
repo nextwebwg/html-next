@@ -14,6 +14,8 @@ import { normalizeStylesheetNamespacesInBrowser } from "./stylesheet-namespaces-
  * run the same selector rewrite over a CSS parser (`component-styles-build.ts`).
  */
 import { fail, type HtmlDiagnostic } from "./diagnostics.js";
+import { asciiLowerCase } from "./names.js";
+import { IDENTIFIER_START } from "./identifiers.js";
 import type { ComponentDefinition, TemplateNode } from "./template.js";
 import { parseTypeExpression } from "./type-system.js";
 import { rewriteValiditySelectors } from "./validity-css.js";
@@ -70,11 +72,13 @@ export function stateAttribute(tag: string): string {
 export type StyleRuleKind = "own" | "slotted";
 
 const RENAMABLE = /\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|:(slotted|state|host-state)\(/g;
-/**
- * `name`, `name=value` with a CSS identifier or quoted value, and an optional `of <tag>`. A literal,
- * so bundles that use only this module's runtime helpers can drop it.
- */
-const STATE_ARGUMENT = /^\s*((?:--|-?[A-Za-z_])[\w-]*)\s*(?:=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|((?:--|-?[A-Za-z_])[\w-]*)))?\s*(?:of\s+([a-z][a-z0-9]*(?:-[a-z0-9]+)+))?\s*$/;
+const statePatterns = /* @__PURE__ */ (() => {
+  const CSS_IDENTIFIER = `(?:--|-?${IDENTIFIER_START})(?:${IDENTIFIER_START}|[0-9-])*`;
+  return {
+    argument: new RegExp(`^\\s*(${CSS_IDENTIFIER})\\s*(?:=\\s*(?:"((?:\\\\.|[^"\\\\])*)"|'((?:\\\\.|[^'\\\\])*)'|(${CSS_IDENTIFIER})))?\\s*(?:of\\s+([a-z][a-z0-9]*(?:-[a-z0-9]+)+))?\\s*$`, "u"),
+    test: new RegExp(`^\\[\\s*(${CSS_IDENTIFIER})\\s*(?:=\\s*(?:"((?:\\\\.|[^"\\\\])*)"|'((?:\\\\.|[^'\\\\])*)'|([^\\]\\s]+))\\s*)?\\]$`, "u"),
+  };
+})();
 /** `:state()` as renamed: the test as an attribute selector, and its `of` component as `[--of]`. */
 const STATE_SENTINEL = /:where\(\s*\[--state\]\s*\):is\(/g;
 
@@ -107,7 +111,7 @@ export function renameComponentPseudoClasses(css: string, kinds: readonly Compon
 }
 
 function stateSentinel(argument: string): string {
-  const match = STATE_ARGUMENT.exec(argument);
+  const match = statePatterns.argument.exec(argument);
   if (match === null) {
     fail("HY002", `\`:state(${argument.trim()})\` takes a state name, an optional \`=value\`, and an optional \`of <tag>\`; quote a value that is not a CSS identifier.`);
   }
@@ -159,14 +163,13 @@ function closingParenthesis(value: string, open: number): number {
 }
 
 const ATTRIBUTE_TEST = /\[(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\]"'])*\]/g;
-const STATE_TEST = /^\[\s*([\w-]+)\s*(?:=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\]\s]+))\s*)?\]$/;
 const OF_TEST = /\[\s*--of\s*=\s*"([^"]*)"\s*\]/;
 type StyleTestKind = "prop" | "state";
 type StyleNameResolver = (name: string, kind: StyleTestKind) => string;
 
 /** A `[name]` or `[name="value"]` test as a token of the state attribute. */
 function stateToken(test: string, tag: string, names: Set<string>, canonical: StyleNameResolver, kind: StyleTestKind): string {
-  const match = STATE_TEST.exec(test);
+  const match = statePatterns.test.exec(test);
   if (match === null) fail("HY002", `\`${kind === "prop" ? ":host()" : ":state()"}\` supports only presence and equality tests on declared values.`);
   const name = canonical(match[1]!, kind);
   const value = match[2] ?? match[3] ?? match[4];
@@ -219,7 +222,7 @@ export function adopterGraph(adopters: readonly ComponentDefinition[]): Componen
 
 function declaresState(definition: ComponentDefinition, name: string, ignoreCase: boolean): boolean {
   return (definition.declarations ?? []).some((declaration) => (declaration.kind === "state" || declaration.kind === "computed")
-    && (ignoreCase ? declaration.name.toLowerCase() === name.toLowerCase() : declaration.name === name));
+    && (ignoreCase ? asciiLowerCase(declaration.name) === asciiLowerCase(name) : declaration.name === name));
 }
 
 /**
@@ -240,7 +243,7 @@ export function foreignStateResolver(graph: ComponentStyleGraph, tested: Map<str
     return name;
   };
   return (test, of) => {
-    const match = STATE_TEST.exec(test);
+    const match = statePatterns.test.exec(test);
     if (match === null) fail("HY002", "`:state()` supports only presence and equality tests on declared values.", source);
     const value = match[2] ?? match[3] ?? match[4];
     const token = (tag: string, name: string): string =>
@@ -521,12 +524,12 @@ export function componentStyleNameResolver(definition: ComponentDefinition, sour
       states.set(declaration.name, declaration.shape ?? declaration.type ?? structure);
     }
   }
-  // CSSOM serializes attribute names in lowercase; resolve them back to their authored names.
+  // CSSOM folds ASCII attribute casing; resolve it back to the authored names.
   const declared = ignoreCase ? new Map([
     ...Object.keys(definition.contract.props), ...states.keys(),
-  ].map((name) => [name.toLowerCase(), name])) : undefined;
+  ].map((name) => [asciiLowerCase(name), name])) : undefined;
   return (input, kind) => {
-    const name = declared?.get(input.toLowerCase()) ?? input;
+    const name = declared?.get(asciiLowerCase(input)) ?? input;
     const selector = kind === "prop" ? ":host()" : ":state()";
     const prop = definition.contract.props[name];
     if (kind === "prop" ? prop === undefined : !states.has(name)) {

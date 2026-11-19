@@ -1,0 +1,167 @@
+[
+  {
+    "name": "default-list",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column, index of $columns\" $key=\"$column\">{$index}:{$column.header}</li></ul></template><template component=\"x-page\"><main><x-list><x-column header=\"A\"></x-column><x-column header=\"B\"></x-column></x-list></main></template>",
+    "expected": "<main><ul><li>0:A</li><li>1:B</li></ul></main>"
+  },
+  {
+    "name": "named-list",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot name=\"headings\" accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}</li></ul></template><template component=\"x-page\"><main><x-list><x-column slot=\"headings\" header=\"A\"></x-column><x-column slot=\"other\" header=\"Ignored\"></x-column><x-column slot=\"headings\"></x-column></x-list></main></template>",
+    "expected": "<main><ul><li>A</li><li>Default</li></ul></main>"
+  },
+  {
+    "name": "child-slot",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\"><slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Fallback {$column.header}</slot></li></ul></template><template component=\"x-page\"><defs><state name=\"outer\" type=\"string\" value=\"Caller\"></state></defs><main><x-list><x-column header=\"A\"><template slot=\"cell\">{$item} {$outer}</template></x-column><x-column header=\"B\"></x-column></x-list></main></template>",
+    "expected": "<main><ul><li>Row Caller</li><li>Fallback B</li></ul></main>"
+  },
+  {
+    "name": "state-initializer-list",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot><state name=\"count\" type=\"integer\" from=\"$columns.length\"></state></defs><p>{$count}:{$columns.length}</p></template><template component=\"x-page\"><main><x-list><x-column header=\"A\"></x-column><x-column header=\"B\"></x-column></x-list></main></template>",
+    "expected": "<main><p>2:2</p></main>"
+  },
+  {
+    "name": "empty-list",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot><state name=\"count\" type=\"integer\" from=\"$columns.length\"></state></defs><p>{$count}:{$columns.length}</p></template><template component=\"x-page\"><main><x-list></x-list></main></template>",
+    "expected": "<main><p>0:0</p></main>"
+  },
+  {
+    "name": "absent-child-slot",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><p><slot of=\"$columns[3]\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></p></template><template component=\"x-page\"><main><x-list><x-column header=\"A\"></x-column></x-list></main></template>",
+    "expected": "<main><p>Fallback</p></main>"
+  },
+  {
+    "name": "plain-child-slot-once",
+    "source": "<template component=\"x-column\"><defs><slot name=\"note\"></slot></defs><aside>Column</aside></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><section><div $each=\"column of $columns\"><p><slot of=\"$column\" name=\"note\">First fallback</slot></p><p><slot of=\"$column\" name=\"note\">Second fallback</slot></p></div></section></template><template component=\"x-page\"><main><x-list><x-column><b slot=\"note\">Plain</b></x-column></x-list></main></template>",
+    "expected": "<main><section><div><p><b slot=\"note\">Plain</b></p><p>Second fallback</p></div></section></main>"
+  },
+  {
+    "name": "repeated-child-template",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><section><div $each=\"column of $columns\"><p><slot of=\"$column\" name=\"cell\" from:item=\"'One'\">First fallback</slot></p><p><slot of=\"$column\" name=\"cell\" from:item=\"'Two'\">Second fallback</slot></p></div></section></template><template component=\"x-page\"><defs><state name=\"outer\" type=\"string\" value=\"Caller\"></state></defs><main><x-list><x-column><template slot=\"cell\">{$item} {$outer}</template></x-column></x-list></main></template>",
+    "expected": "<main><section><div><p>One Caller</p><p>Two Caller</p></div></section></main>"
+  },
+  {
+    "name": "sorted-child-list",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}</li></ul></template><template component=\"x-page\"><defs><state name=\"rows\" type=\"list(string)\" from=\"['B', 'A', 'C']\"></state></defs><main><x-list><x-column $each=\"label, position of $rows\" $sort=\"label\" $limit=\"2\" from:header=\"$label\"></x-column></x-list></main></template>",
+    "expected": "<main><ul><li>A</li><li>B</li></ul></main>"
+  },
+  {
+    "name": "iterated-child-template-scope",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></li></ul></template><template component=\"x-page\"><defs><state name=\"rows\" type=\"list(string)\" from=\"['B', 'A', 'C']\"></state></defs><main><x-list><x-column $each=\"label, position of $rows\" $sort=\"label\" $limit=\"2\" from:header=\"$label\"><template slot=\"cell\">{$item}:{$label}:{$position}</template></x-column></x-list></main></template>",
+    "expected": "<main><ul><li>ARow:A:0</li><li>BRow:B:1</li></ul></main>"
+  },
+  {
+    "name": "simple-iterated-child-template-scope",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></li></ul></template><template component=\"x-page\"><defs><state name=\"rows\" type=\"list(string)\" from=\"['B', 'A', 'C']\"></state></defs><main><x-list><x-column $each=\"label of $rows\" from:header=\"$label\"><template slot=\"cell\">{$item}:{$label}</template></x-column></x-list></main></template>",
+    "expected": "<main><ul><li>BRow:B</li><li>ARow:A</li><li>CRow:C</li></ul></main>"
+  },
+  {
+    "name": "nested-iterated-child-template-scope",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></li></ul></template><template component=\"x-page\"><defs><state name=\"groups\" type=\"list(list(string))\" from=\"[['A','B'],['C']]\"></state></defs><main><x-list><template $each=\"group, groupIndex of $groups\"><x-column $each=\"label, position of $group\" from:header=\"$label\"><template slot=\"cell\">{$item}:{$label}:{$groupIndex}:{$position}</template></x-column></template></x-list></main></template>",
+    "expected": "<main><ul><li>ARow:A:0:0</li><li>BRow:B:0:1</li><li>CRow:C:1:0</li></ul></main>"
+  },
+  {
+    "name": "literal-iterated-child-template-scope",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></li></ul></template><template component=\"x-page\"><defs><state name=\"rows\" type=\"list(string)\" value=\"['B', 'A', 'C']\"></state></defs><main><x-list><x-column $each=\"label of $rows\" from:header=\"$label\"><template slot=\"cell\">{$item}:{$label}</template></x-column></x-list></main></template>",
+    "expected": "<main><ul><li>BRow:B</li><li>ARow:A</li><li>CRow:C</li></ul></main>"
+  },
+  {
+    "name": "iterated-child-template-scope-forwarded-owner",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></li></ul></template><template noforward component=\"x-source\"><defs><state name=\"rows\" type=\"list(string)\" from=\"['A','B']\"></state></defs><section><x-list><x-column $each=\"label, position of $rows\" from:header=\"$label\"><template slot=\"cell\"><i $attributes>{$label}:{$position}:{$item}</i></template></x-column></x-list></section></template><template component=\"x-page\"><main><x-source title=\"Caller\"></x-source></main></template>",
+    "expected": "<main><section><ul><li>A<i title=\"Caller\">A:0:Row</i></li><li>B<i title=\"Caller\">B:1:Row</i></li></ul></section></main>"
+  },
+  {
+    "name": "iterated-child-template-scope-projected-owner",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></li></ul></template><template component=\"x-source\"><defs><slot name=\"label\"></slot><state name=\"rows\" type=\"list(string)\" from=\"['A','B']\"></state></defs><section><x-list><x-column $each=\"label, position of $rows\" from:header=\"$label\"><template slot=\"cell\"><i><slot name=\"label\">Missing</slot>:{$label}</i></template></x-column></x-list></section></template><template component=\"x-page\"><main><x-source><template slot=\"label\">Owner</template></x-source></main></template>",
+    "expected": "<main><section><ul><li>A<i>Owner:A</i></li><li>B<i>Owner:B</i></li></ul></section></main>"
+  },
+  {
+    "name": "iterated-child-template-scope-borrowed-owner",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></li></ul></template><template component=\"x-note\"><defs><slot name=\"note\"></slot></defs><aside><slot name=\"note\"></slot></aside></template><template component=\"x-source\"><defs><slot accepts=\"x-note\" as=\"notes\"></slot><state name=\"rows\" type=\"list(string)\" from=\"['A','B']\"></state></defs><section><x-list><x-column $each=\"label, position of $rows\" from:header=\"$label\"><template slot=\"cell\"><i><slot of=\"$notes[0]\" name=\"note\">Missing</slot>:{$label}</i></template></x-column></x-list></section></template><template component=\"x-page\"><main><x-source><x-note><template slot=\"note\">Outside</template></x-note></x-source></main></template>",
+    "expected": "<main><section><ul><li>A<i>Outside:A</i></li><li>B<i>Outside:B</i></li></ul></section></main>"
+  },
+  {
+    "name": "iterated-child-template-scope-borrowed-owner-alias",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></li></ul></template><template component=\"x-note\"><defs><slot name=\"note\"></slot></defs><aside><slot name=\"note\"></slot></aside></template><template component=\"x-source\"><defs><slot accepts=\"x-note\" as=\"notes\"></slot><state name=\"rows\" type=\"list(string)\" from=\"['A','B']\"></state></defs><section><x-list><x-column $each=\"label, position of $rows\" from:header=\"$label\"><template slot=\"cell\"><i><slot $each=\"note of $notes\" of=\"$note\" name=\"note\">Missing</slot>:{$label}</i></template></x-column></x-list></section></template><template component=\"x-page\"><main><x-source><x-note><template slot=\"note\">Outside</template></x-note></x-source></main></template>",
+    "expected": "<main><section><ul><li>A<i>Outside:A</i></li><li>B<i>Outside:B</i></li></ul></section></main>"
+  },
+  {
+    "name": "mixed-accepted-props-and-slots",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-other\"><defs><prop name=\"badge\" type=\"integer\" default=\"7\">Badge.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><aside><slot name=\"cell\" from:item=\"'Own'\"></slot></aside></template><template component=\"x-list\"><defs><slot accepts=\"x-column x-other\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{default($column.header,'Missing')}:{default($column.badge,0)}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\"></slot></li></ul></template><template component=\"x-page\"><main><x-list><x-column header=\"A\"><template slot=\"cell\">{$item}:Text</template></x-column><x-other badge=\"9\"><template slot=\"cell\">{$item}:Other</template></x-other></x-list></main></template>",
+    "expected": "<main><ul><li>A:0Row:Text</li><li>Missing:9Row:Other</li></ul></main>"
+  },
+  {
+    "name": "preset-accepted-resolved-props-and-slots",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><span><slot name=\"cell\" from:item=\"'Own'\"></slot></span></template><template component=\"x-preset\"><defs><prop name=\"tone\" type=\"string\" default=\"Preset\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\" required>Item.</prop></slot></defs><x-column from:header=\"$tone\"><template slot=\"cell\"><slot name=\"cell\" from:item=\"$item\"></slot></template></x-column></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\">Missing</slot></li></ul></template><template component=\"x-page\"><main><x-list><x-preset><template slot=\"cell\">{$item}:Preset</template></x-preset><x-preset tone=\"Caller\"><template slot=\"cell\">{$item}:Caller</template></x-preset></x-list></main></template>",
+    "expected": "<main><ul><li>PresetRow:Preset</li><li>CallerRow:Caller</li></ul></main>"
+  },
+  {
+    "name": "preset-accepted-resolved-base-props",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop></defs><b>{$header}</b></template><template component=\"x-preset\"><defs><prop name=\"tone\" type=\"string\" default=\"Preset\">Tone.</prop></defs><x-column from:header=\"$tone\"></x-column></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}</li></ul></template><template component=\"x-page\"><main><x-list><x-preset></x-preset><x-preset tone=\"Caller\"></x-preset></x-list></main></template>",
+    "expected": "<main><ul><li>Preset</li><li>Caller</li></ul></main>"
+  },
+  {
+    "name": "preset-accepted-forwarded-prop-input",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot></defs><b>{$header}</b></template><template component=\"x-preset\"><x-column $attributes></x-column></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\"></slot></li></ul></template><template component=\"x-page\"><main><x-list><x-preset header=\"Forwarded\"></x-preset></x-list></main></template>",
+    "expected": "<main><ul><li>Forwarded</li></ul></main>"
+  },
+  {
+    "name": "preset-chain-accepted-scope-and-props",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot></defs><b>{$header}</b></template><template component=\"x-mid\"><defs><prop name=\"tone\" type=\"string\">Tone.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot></defs><x-column from:header=\"$tone\"><template slot=\"cell\"><slot name=\"cell\" from:item=\"$item\"></slot></template></x-column></template><template component=\"x-preset\"><defs><prop name=\"title\" type=\"string\" default=\"Preset\">Title.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot><state name=\"resolved\" type=\"string\" from=\"$title\"></state></defs><x-mid from:tone=\"$resolved\"><template slot=\"cell\"><slot name=\"cell\" from:item=\"$item\"></slot></template></x-mid></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\"></slot></li></ul></template><template component=\"x-page\"><main><x-list><x-preset><template slot=\"cell\">{$item}:Page</template></x-preset></x-list></main></template>",
+    "expected": "<main><ul><li>PresetRow:Page</li></ul></main>"
+  },
+  {
+    "name": "preset-authored-cell-uses-preset-scope",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\" default=\"Default\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot></defs><b>{$header}</b></template><template component=\"x-preset\"><defs><prop name=\"tone\" type=\"string\" default=\"Preset\">Tone.</prop></defs><x-column from:header=\"$tone\"><template slot=\"cell\">{$tone}:{$item}</template></x-column></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\"></slot></li></ul></template><template component=\"x-page\"><main><x-list><x-preset></x-preset><x-preset tone=\"Caller\"></x-preset></x-list></main></template>",
+    "expected": "<main><ul><li>PresetPreset:Row</li><li>CallerCaller:Row</li></ul></main>"
+  },
+  {
+    "name": "aliased-child-template-scope",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot></defs><b>{$header}</b></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\"></slot></li></ul></template><template component=\"x-page\"><main><x-list><template $with=\"'Alias' as title\"><x-column from:header=\"$title\"><template slot=\"cell\">{$title}:{$item}</template></x-column></template></x-list></main></template>",
+    "expected": "<main><ul><li>AliasAlias:Row</li></ul></main>"
+  },
+  {
+    "name": "matched-child-template-scope",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot></defs><b>{$header}</b></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\"></slot></li></ul></template><template component=\"x-page\"><main><x-list><template $match=\"{ name: 'Selected', active: true } as selection\"><x-column $when=\"false\" header=\"Wrong\"></x-column><x-column $when=\"$selection.active\" from:header=\"$selection.name\"><template slot=\"cell\">{$selection.name}:{$item}</template></x-column><x-column $else header=\"Fallback\"></x-column></template></x-list></main></template>",
+    "expected": "<main><ul><li>SelectedSelected:Row</li></ul></main>"
+  },
+  {
+    "name": "plain-child-slot-shared-with-own-outlet-own-first",
+    "source": "<template component=\"x-column\"><defs><slot name=\"cell\"></slot></defs><b><slot name=\"cell\">OwnFallback</slot></b></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><section><slot></slot><p $each=\"column of $columns\"><slot of=\"$column\" name=\"cell\">BorrowedFallback</slot></p></section></template><template component=\"x-page\"><main><x-list><x-column><i slot=\"cell\">Plain</i></x-column></x-list></main></template>",
+    "expected": "<main><section><b><i slot=\"cell\">Plain</i></b><p>BorrowedFallback</p></section></main>"
+  },
+  {
+    "name": "plain-child-slot-shared-with-own-outlet-borrowed-first",
+    "source": "<template component=\"x-column\"><defs><slot name=\"cell\"></slot></defs><b><slot name=\"cell\">OwnFallback</slot></b></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><section><p $each=\"column of $columns\"><slot of=\"$column\" name=\"cell\">BorrowedFallback</slot></p><slot></slot></section></template><template component=\"x-page\"><main><x-list><x-column><i slot=\"cell\">Plain</i></x-column></x-list></main></template>",
+    "expected": "<main><section><p><i slot=\"cell\">Plain</i></p><b>OwnFallback</b></section></main>"
+  },
+  {
+    "name": "plain-child-slot-shared-with-own-outlet-unplaced",
+    "source": "<template component=\"x-column\"><defs><slot name=\"cell\"></slot></defs><b><slot name=\"cell\">OwnFallback</slot></b></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><section><p $each=\"column of $columns\"><slot of=\"$column\" name=\"cell\">BorrowedFallback</slot></p></section></template><template component=\"x-page\"><main><x-list><x-column><i slot=\"cell\">Plain</i></x-column></x-list></main></template>",
+    "expected": "<main><section><p><i slot=\"cell\">Plain</i></p></section></main>"
+  },
+  {
+    "name": "borrowed-child-slot-from-implicit-outlet",
+    "source": "<template component=\"x-column\"><b><slot name=\"cell\">OwnFallback</slot></b></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><section><slot></slot><p $each=\"column of $columns\"><slot of=\"$column\" name=\"cell\">BorrowedFallback</slot></p></section></template><template component=\"x-page\"><main><x-list><x-column><i slot=\"cell\">Plain</i></x-column></x-list></main></template>",
+    "expected": "<main><section><b><i slot=\"cell\">Plain</i></b><p>BorrowedFallback</p></section></main>"
+  },
+  {
+    "name": "plain-child-slot-repeated-own-outlets",
+    "source": "<template component=\"x-column\"><defs><slot name=\"cell\"></slot></defs><b><slot name=\"cell\">OwnFallback</slot><slot name=\"cell\">SecondFallback</slot></b></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><section><slot></slot><p $each=\"column of $columns\"><slot of=\"$column\" name=\"cell\">BorrowedFallback</slot></p></section></template><template component=\"x-page\"><main><x-list><x-column><i slot=\"cell\">Plain</i></x-column></x-list></main></template>",
+    "expected": "<main><section><b><i slot=\"cell\">Plain</i>SecondFallback</b><p>BorrowedFallback</p></section></main>"
+  },
+  {
+    "name": "computed-owned-entry-alias",
+    "source": "<template component=\"x-column\"><defs><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot></defs><b></b></template><template component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot><computed name=\"chosen\" from=\"$columns[0]\"></computed></defs><ul><slot of=\"$chosen\" name=\"cell\" from:item=\"'Row'\">Fallback</slot></ul></template><template component=\"x-page\"><main><x-list><x-column><template slot=\"cell\">{$item}</template></x-column></x-list><x-list></x-list></main></template>",
+    "expected": "<main><ul>Row</ul><ul>Fallback</ul></main>"
+  },
+  {
+    "name": "preset-authored-cell-keeps-invocation-attributes",
+    "source": "<template component=\"x-column\"><defs><prop name=\"header\" type=\"string\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot></defs><b><slot name=\"cell\" from:item=\"'Own'\"></slot></b></template><template component=\"x-preset\"><defs><prop name=\"tone\" type=\"string\" default=\"Preset\">Tone.</prop></defs><x-column from:header=\"$tone\"><template slot=\"cell\"><i $attributes>{$tone}:{$item}</i></template></x-column></template><template noforward component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\"></slot></li></ul></template><template component=\"x-page\"><main><x-list id=\"list\"><x-preset tone=\"Caller\" id=\"preset\" class=\"caller\"></x-preset></x-list></main></template>",
+    "expected": "<main><ul><li>Caller<i id=\"preset\" class=\"caller\">Caller:Row</i></li></ul></main>"
+  },
+  {
+    "name": "preset-authored-cell-forwards-through-component",
+    "source": "<template component=\"x-token\"><u $attributes><slot></slot></u></template><template component=\"x-column\"><defs><prop name=\"header\" type=\"string\">Heading.</prop><slot name=\"cell\"><prop name=\"item\" type=\"string\">Item.</prop></slot></defs><b><slot name=\"cell\" from:item=\"'Own'\"></slot></b></template><template component=\"x-preset\"><defs><prop name=\"tone\" type=\"string\" default=\"Preset\">Tone.</prop></defs><x-column from:header=\"$tone\"><template slot=\"cell\"><x-token $attributes>{$tone}:{$item}</x-token></template></x-column></template><template noforward component=\"x-list\"><defs><slot accepts=\"x-column\" as=\"columns\"></slot></defs><ul><li $each=\"column of $columns\">{$column.header}<slot of=\"$column\" name=\"cell\" from:item=\"'Row'\"></slot></li></ul></template><template component=\"x-page\"><main><x-list id=\"list\"><x-preset tone=\"Caller\" id=\"preset\" class=\"caller\"></x-preset></x-list></main></template>",
+    "expected": "<main><ul><li>Caller<u id=\"preset\" class=\"caller\">Caller:Row</u></li></ul></main>"
+  }
+]

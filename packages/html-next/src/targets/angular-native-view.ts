@@ -40,7 +40,6 @@ export class HtmlNextView {
   private root: Element | undefined;
   private readonly outputs = new Map<string, EventEmitter<Event>>();
   private readonly listeners = new Map<string, (event: Event) => void>();
-  private attributes: Record<string, unknown> = {};
   private bindings: readonly NativeBinding[] = [];
   private stopEvents: (() => void) | undefined;
   private eventKey = "";
@@ -88,45 +87,9 @@ export class HtmlNextView {
   }
   attach(root: Element): () => void {
     if (this.root) for (const [name, listener] of this.listeners) this.root.removeEventListener(name, listener);
-    this.root = root; this.attributes = {}; this.eventKey = "";
+    this.root = root; this.eventKey = "";
     for (const [name, listener] of this.listeners) root.addEventListener(name, listener);
     return () => { for (const [name, listener] of this.listeners) root.removeEventListener(name, listener); if (this.root === root) { this.root = undefined; this.stopEvents?.(); this.stopEvents = undefined; } };
-  }
-  forward(values: Record<string, unknown>, authored: readonly string[]): void {
-    const root = this.root;
-    if (!root) return;
-    const next = Object.fromEntries(Object.entries(values).filter(([name, value]) => value !== undefined && (!authored.includes(name) || name === "class" || name === "style")));
-    for (const [name, value] of Object.entries({ ...this.attributes, ...next })) {
-      if (name === "class") {
-        const old = String(this.attributes[name] ?? "").split(/\\s+/).filter(Boolean);
-        const current = String(next[name] ?? "").split(/\\s+/).filter(Boolean);
-        for (const token of old) if (!current.includes(token) && !authored.includes("class." + token)) this.renderer.removeClass(root, token);
-        for (const token of current) if (!authored.includes("class." + token)) this.renderer.addClass(root, token);
-      } else if (name === "style") {
-        const parse = (value: unknown): Record<string, unknown> => {
-          if (value !== null && typeof value === "object") return value as Record<string, unknown>;
-          const probe = this.renderer.createElement("span") as HTMLElement;
-          probe.style.cssText = value == null ? "" : String(value);
-          return Object.fromEntries(Array.from(probe.style).map(name => [name, probe.style.getPropertyValue(name)]));
-        };
-        const previous = parse(this.attributes.style), current = parse(next.style);
-        for (const key of new Set([...Object.keys(previous), ...Object.keys(current)])) {
-          if (authored.includes("style." + key)) continue;
-          if (current[key] == null) this.renderer.removeStyle(root, key, 2);
-          else this.renderer.setStyle(root, key, current[key], 2);
-        }
-      } else if (name.startsWith("class.")) {
-        if (next[name]) this.renderer.addClass(root, name.slice(6)); else this.renderer.removeClass(root, name.slice(6));
-      } else if (name.startsWith("style.")) {
-        if (next[name] == null) this.renderer.removeStyle(root, name.slice(6), 2); else this.renderer.setStyle(root, name.slice(6), next[name], 2);
-      } else if (name.startsWith(".")) this.renderer.setProperty(root, name.slice(1), next[name]);
-      else {
-        const textBoolean = name.startsWith("aria-") || ["contenteditable", "draggable", "spellcheck"].includes(name);
-        if (!(name in next) || value == null || value === false && !textBoolean) this.renderer.removeAttribute(root, name);
-        else this.renderer.setAttribute(root, name, value === true && !textBoolean ? "" : String(value));
-      }
-    }
-    this.attributes = next;
   }
   forwardEvents(bindings: readonly NativeBinding[]): void {
     this.bindings = bindings;
@@ -223,7 +186,7 @@ class ${rootName} {
   ${source.injections.map(item => `readonly ${item.name} = inject(${item.type});`).join("\n  ")}
   private stop: (() => void) | undefined;
   ngOnInit(): void { const owner = this.hnOwner(); owner.hnRoot = this.element; ${source.injections.map(item => `owner.${item.name} = this.${item.name};`).join(" ")} owner.hnInitializeRoot(); this.stop = owner.hnView.attach(this.element.nativeElement); }
-  ngAfterViewChecked(): void { const owner = this.hnOwner(); owner.hnView.forward(owner.hnForwardedAttributes(), this.hnAuthored()); owner.hnView.forwardEvents(owner.hnCallerEvents()); }
+  ngAfterViewChecked(): void { const owner = this.hnOwner(); owner.hnView.forwardEvents(owner.hnCallerEvents()); }
   ngOnDestroy(): void { this.stop?.(); }
 }
 @Directive({ selector: ${quote(`ng-template[${source.tag}]`)}, standalone: true,

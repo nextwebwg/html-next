@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup-dark.svg">
+  <img src="https://raw.githubusercontent.com/nextwebwg/html-next/main/assets/brand/html-next-lockup.svg" alt="HTML Next" width="280">
+</picture>
+
 # `@nextwebwg/html-next-converter`
 
 Converts a Declarative Components application or library graph into Vue 3.5 or Svelte 5 single-file
@@ -130,8 +135,9 @@ and state-selected types), state/computed/handlers, named and scoped slots, nati
 flow, and keyed lists. Native-control helpers preserve authored reset defaults and dirty edits;
 Svelte's normal compiler owns rendering, SSR, and hydration. Components import the rendering and
 binding helpers their markup and handlers call from the shared `svelte/render.svelte.ts`, which an
-application ships once. Scripts are formatted in `sv create`'s style. Markup breaks lines inside tags,
-because Svelte renders whitespace between elements as a space, and after a space the template keeps.
+application ships once. Scripts and styles use two-space indentation, with blank lines separating imports, types and functions.
+Markup breaks lines at element edges and after authored spaces. Between adjacent elements with no
+space, it breaks inside tags to preserve Svelte's rendered whitespace.
 
 ```sh
 html-next-convert svelte 'components/**' --mode library --out-dir generated

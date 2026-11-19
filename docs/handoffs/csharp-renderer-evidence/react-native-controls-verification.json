@@ -1,0 +1,425 @@
+{
+  "scope": "React native input commits, controller-owned name/type and native value/default handling. Incremental implementation evidence, not whole-renderer ship readiness.",
+  "baseline": "a7f29798",
+  "status": "Incremental input fix verified locally and in the previously failing Looma shard. Full catalog browser qualification and the whole native renderer goal remain incomplete.",
+  "behavior": {
+    "nativeFields": "Unchanged authored name/type preserve controller edits during commits; changed authored name/type apply.",
+    "ownership": "A single input component replaces the prior functional input owner. No extra row component or as-list enrollment.",
+    "refs": "Callback/object ref publication and callback cleanup share the existing native handle owner; StrictMode republishes after cleanup.",
+    "style": "Important-free styles retain the original ref; important declarations keep priority application."
+  },
+  "verification": {
+    "controlBrowserCases": {
+      "passed": 30,
+      "failed": 0,
+      "engines": [
+        "Chromium",
+        "Linux Firefox",
+        "WebKit"
+      ],
+      "modes": [
+        "fresh",
+        "hydrated"
+      ],
+      "strictMode": true,
+      "seconds": 58.4361275,
+      "command": "pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/react-forwarded-control-parity.test.ts packages/html-next-converter/tests/react-control-parity.test.ts packages/html-next-converter/tests/react-form-parity.test.ts packages/html-next-converter/tests/react-dynamic-control-parity.test.ts"
+    },
+    "declarationConsumers": {
+      "passed": 3,
+      "targets": [
+        "React",
+        "Preact",
+        "Vue"
+      ],
+      "command": "pnpm exec vitest run packages/html-next-unplugin/tests/framework.test.ts -t 'consumes a packed component folder'"
+    },
+    "catalogCompilation": {
+      "componentsPerTarget": 106,
+      "targets": 6,
+      "seconds": 30.34,
+      "preparedInputs": "6ddd4f70f039d2227b65e56ab232527b636febad00e3ff8d40baedfdff28df9c"
+    },
+    "loomaReactChromiumShard2": {
+      "command": "LOOMA_TEST_TARGET=react LOOMA_TEST_BROWSER=chromium LOOMA_PARALLEL_SCENARIOS=0 node packages/looma/tests/run-pressure.mjs --prepared --shard=2/4",
+      "convertedSourcePassed": 165,
+      "browserConfigPassed": 75,
+      "failed": 0,
+      "sharedAssertionsChanged": false,
+      "preparedInputs": "6ddd4f70f039d2227b65e56ab232527b636febad00e3ff8d40baedfdff28df9c"
+    },
+    "repositoryGate": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH pnpm verify:pr",
+      "exitCode": 0,
+      "javascript": {
+        "passed": 2062,
+        "gatedSkips": 4904,
+        "sourceSeconds": 343.22
+      },
+      "native": {
+        "passed": 778,
+        "skipped": 0
+      },
+      "fluidCompleteOutputComparisons": 5,
+      "packedConsumers": {
+        "passed": 8,
+        "seconds": 61.8
+      },
+      "notes": "Includes verify:inner. The two additional existing gated browser fixtures were migrated afterward; focused lint, converter types and all 36 browser cases passed on those final fixture sources."
+    },
+    "nativeDefaultsCssRootRefs": {
+      "passed": 36,
+      "failed": 0,
+      "engines": [
+        "Chromium",
+        "Linux Firefox",
+        "WebKit"
+      ],
+      "seconds": 51.77,
+      "command": "pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/react-root-ref-parity.test.ts packages/html-next-converter/tests/react-form-model-parity.test.ts",
+      "fixtureMigration": "Add explicit $attributes at native destinations; keep all behavior and CSS assertions unchanged. Use the existing parity launcher for Linux Firefox."
+    },
+    "postFixtureChecks": {
+      "lint": "passed",
+      "converterTypes": "passed"
+    }
+  },
+  "performance": {
+    "reports": {
+      "plain": {
+        "bundle": {
+          "scope": "Native input list, React external, a7f29798 versus current source. Bundled helpers, React external. Full SSR output compared. No runtime timing claim.",
+          "results": [
+            {
+              "name": "baseline",
+              "bytes": 28086,
+              "gzip": 9513,
+              "html": "<div data-html-next-renderer=\"react\" component=\"x-controls\"><input type=\"checkbox\" title=\"Initial\" name=\"choice\"/><input type=\"checkbox\" title=\"Initial\" name=\"choice\"/><input type=\"checkbox\" title=\"Initial\" name=\"choice\"/></div>"
+            },
+            {
+              "name": "current",
+              "bytes": 29126,
+              "gzip": 9864,
+              "html": "<div data-html-next-renderer=\"react\" component=\"x-controls\"><input type=\"checkbox\" title=\"Initial\" name=\"choice\"/><input type=\"checkbox\" title=\"Initial\" name=\"choice\"/><input type=\"checkbox\" title=\"Initial\" name=\"choice\"/></div>"
+            }
+          ]
+        },
+        "updates": {
+          "scope": "Production React19 native input title updates a7f29798 versus current, Chromium, flushSync. 2 warmup rounds, 9 alternating paired samples. React bundled; full DOM proven outside timing. Browser qualification should be idle during timing.",
+          "results": [
+            {
+              "count": 100,
+              "toggles": 80,
+              "samples": {
+                "baseline": [
+                  0.1449999999254942,
+                  0.1362500000745058,
+                  0.13875000029802323,
+                  0.13250000029802322,
+                  0.1324999999254942,
+                  0.1299999997019768,
+                  0.1237500000745058,
+                  0.1225000001490116,
+                  0.1237500000745058
+                ],
+                "current": [
+                  0.1612500000745058,
+                  0.14375,
+                  0.14249999970197677,
+                  0.1425000000745058,
+                  0.14624999985098838,
+                  0.1362500000745058,
+                  0.13999999985098838,
+                  0.1387499999254942,
+                  0.1412499997764826
+                ]
+              },
+              "medianMs": {
+                "baseline": 0.1324999999254942,
+                "current": 0.14249999970197677
+              },
+              "ratio": 1.0754716964687219,
+              "proof": [
+                {
+                  "name": "baseline",
+                  "active": 0,
+                  "count": 100,
+                  "characters": 5537,
+                  "sha256": "fc0316ab7ead97a135219e18dcaf0cced8601fb77735a87377c415d0bb4a1e6c"
+                },
+                {
+                  "name": "baseline",
+                  "active": 99,
+                  "count": 100,
+                  "characters": 5436,
+                  "sha256": "fff2e0adad45b1d3603310c6fb19c5a8fdce7a143ad59306b4763d208378c5d3"
+                },
+                {
+                  "name": "current",
+                  "active": 0,
+                  "count": 100,
+                  "characters": 5537,
+                  "sha256": "fc0316ab7ead97a135219e18dcaf0cced8601fb77735a87377c415d0bb4a1e6c"
+                },
+                {
+                  "name": "current",
+                  "active": 99,
+                  "count": 100,
+                  "characters": 5436,
+                  "sha256": "fff2e0adad45b1d3603310c6fb19c5a8fdce7a143ad59306b4763d208378c5d3"
+                }
+              ]
+            },
+            {
+              "count": 1000,
+              "toggles": 80,
+              "samples": {
+                "baseline": [
+                  1.1625,
+                  1.1425000000745058,
+                  1.148750000074506,
+                  1.1724999997764827,
+                  1.1362499997019768,
+                  1.1387499999254942,
+                  1.13125,
+                  1.1349999997764826,
+                  1.1237500000745058
+                ],
+                "current": [
+                  1.2662499997764827,
+                  1.2412499997764825,
+                  1.2324999999254942,
+                  1.2350000001490116,
+                  1.2337499998509884,
+                  1.23125,
+                  1.2324999999254942,
+                  1.226249999925494,
+                  1.2399999998509883
+                ]
+              },
+              "medianMs": {
+                "baseline": 1.1387499999254942,
+                "current": 1.2337499998509884
+              },
+              "ratio": 1.0834248078434334,
+              "proof": [
+                {
+                  "name": "baseline",
+                  "active": 0,
+                  "count": 1000,
+                  "characters": 51437,
+                  "sha256": "d1ec7488087a728795457760af129f93c31f4065037242eee58c78dabfe4dc13"
+                },
+                {
+                  "name": "baseline",
+                  "active": 999,
+                  "count": 1000,
+                  "characters": 50436,
+                  "sha256": "de3fa132cb3323a178e61d7a6aaef327c3f6dec4cb64a325c4343ef45b0f0e4a"
+                },
+                {
+                  "name": "current",
+                  "active": 0,
+                  "count": 1000,
+                  "characters": 51437,
+                  "sha256": "d1ec7488087a728795457760af129f93c31f4065037242eee58c78dabfe4dc13"
+                },
+                {
+                  "name": "current",
+                  "active": 999,
+                  "count": 1000,
+                  "characters": 50436,
+                  "sha256": "de3fa132cb3323a178e61d7a6aaef327c3f6dec4cb64a325c4343ef45b0f0e4a"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "controls": {
+        "bundle": {
+          "scope": "Native input list, React external, a7f29798 versus current source. Bundled helpers, React external. Full SSR output compared. No runtime timing claim.",
+          "results": [
+            {
+              "name": "baseline",
+              "bytes": 30514,
+              "gzip": 10445,
+              "html": "<div data-html-next-renderer=\"react\" component=\"x-controls\"><input type=\"checkbox\" title=\"Initial\" name=\"choice\" value=\"blue\"/><input type=\"checkbox\" title=\"Initial\" name=\"choice\" value=\"blue\"/><input type=\"checkbox\" title=\"Initial\" name=\"choice\" value=\"blue\"/></div>"
+            },
+            {
+              "name": "current",
+              "bytes": 29153,
+              "gzip": 9876,
+              "html": "<div data-html-next-renderer=\"react\" component=\"x-controls\"><input type=\"checkbox\" title=\"Initial\" name=\"choice\" value=\"blue\"/><input type=\"checkbox\" title=\"Initial\" name=\"choice\" value=\"blue\"/><input type=\"checkbox\" title=\"Initial\" name=\"choice\" value=\"blue\"/></div>"
+            }
+          ]
+        },
+        "updates": {
+          "scope": "Production React19 native input title updates a7f29798 versus current, Chromium, flushSync. 2 warmup rounds, 9 alternating paired samples. React bundled; full DOM proven outside timing. Browser qualification should be idle during timing.",
+          "results": [
+            {
+              "count": 100,
+              "toggles": 80,
+              "samples": {
+                "baseline": [
+                  0.18125,
+                  0.16625000014901162,
+                  0.1637499999254942,
+                  0.1787499997764826,
+                  0.1737500000745058,
+                  0.1612500000745058,
+                  0.15500000007450582,
+                  0.15250000022351742,
+                  0.1524999998509884
+                ],
+                "current": [
+                  0.1649999998509884,
+                  0.1487500000745058,
+                  0.14874999970197678,
+                  0.1475000001490116,
+                  0.15,
+                  0.1375,
+                  0.1425000000745058,
+                  0.1375,
+                  0.1362500000745058
+                ]
+              },
+              "medianMs": {
+                "baseline": 0.1637499999254942,
+                "current": 0.1475000001490116
+              },
+              "ratio": 0.9007633600984654,
+              "proof": [
+                {
+                  "name": "baseline",
+                  "active": 0,
+                  "count": 100,
+                  "characters": 6837,
+                  "sha256": "b382599cfbf0dbe73e29681ecc095ff86975c1ebeb4bb8c7589cadf12af46590"
+                },
+                {
+                  "name": "baseline",
+                  "active": 99,
+                  "count": 100,
+                  "characters": 6736,
+                  "sha256": "520b1a21235bf8b3ca10a2b39d6f75506308e2e8802267f6af557f90eda530d5"
+                },
+                {
+                  "name": "current",
+                  "active": 0,
+                  "count": 100,
+                  "characters": 6837,
+                  "sha256": "b382599cfbf0dbe73e29681ecc095ff86975c1ebeb4bb8c7589cadf12af46590"
+                },
+                {
+                  "name": "current",
+                  "active": 99,
+                  "count": 100,
+                  "characters": 6736,
+                  "sha256": "520b1a21235bf8b3ca10a2b39d6f75506308e2e8802267f6af557f90eda530d5"
+                }
+              ]
+            },
+            {
+              "count": 1000,
+              "toggles": 80,
+              "samples": {
+                "baseline": [
+                  1.4549999997019767,
+                  1.4712499998509885,
+                  1.461250000074506,
+                  1.4625,
+                  1.4487499997019768,
+                  1.4462499998509883,
+                  1.4512500002980233,
+                  1.4450000002980232,
+                  1.45
+                ],
+                "current": [
+                  1.319999999925494,
+                  1.2649999998509884,
+                  1.2912499997764826,
+                  1.2699999999254943,
+                  1.26875,
+                  1.275,
+                  1.2899999998509883,
+                  1.2699999999254943,
+                  1.2962499998509884
+                ]
+              },
+              "medianMs": {
+                "baseline": 1.4512500002980233,
+                "current": 1.275
+              },
+              "ratio": 0.8785529713958109,
+              "proof": [
+                {
+                  "name": "baseline",
+                  "active": 0,
+                  "count": 1000,
+                  "characters": 64437,
+                  "sha256": "f3bb8e08ec2be4a8ce4f4f92d554043334227be227e2ec8649bf93b68814a465"
+                },
+                {
+                  "name": "baseline",
+                  "active": 999,
+                  "count": 1000,
+                  "characters": 63436,
+                  "sha256": "84220c7cd0b7b0eb7f60e06f40552c233754019d28a30332556673501b251279"
+                },
+                {
+                  "name": "current",
+                  "active": 0,
+                  "count": 1000,
+                  "characters": 64437,
+                  "sha256": "f3bb8e08ec2be4a8ce4f4f92d554043334227be227e2ec8649bf93b68814a465"
+                },
+                {
+                  "name": "current",
+                  "active": 999,
+                  "count": 1000,
+                  "characters": 63436,
+                  "sha256": "84220c7cd0b7b0eb7f60e06f40552c233754019d28a30332556673501b251279"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "limitations": [
+      "Production Chromium forced synchronous title updates; not all React workloads.",
+      "Two warmups, nine alternating paired samples, eighty toggles per sample. Full outputs and native form data checked outside timing.",
+      "Own verification was idle during timing; other machine workloads were uncontrolled.",
+      "Timings precede the StrictMode unmount cleanup and declaration-only export annotation. Those changes do not alter the measured update path.",
+      "Intermediate extra-component implementations exceeded the 25% limit and were rejected."
+    ]
+  },
+  "remaining": [
+    "Complete real Looma six-target, three-engine browser qualification.",
+    "Pending owner choice on existing initially invalid class binding plus empty forwarding marker.",
+    "Complete native C# as/of, styles, shared client selection, preparation, hydration, native catalog, speed and memory work.",
+    "Whole-goal bounded review and release readiness."
+  ],
+  "sourceSha256": {
+    "packages/html-next/src/targets/react-render.ts": "5c37b80525d401a12ee5893e7d38d7dc7cd2f7b48d75c8c7234630840bcc3ff8",
+    "packages/html-next/src/targets/react.ts": "f0f1647e6ebeb4a462f9bf37f4e773bad840164ad84ff8802fbb0ba0afc4b931",
+    "packages/html-next/src/targets/inline-style.ts": "cd6edd1106e6b76ffd04314c6679eb3f009de740cfb1e55d6e44a15e6f76faaf",
+    "packages/html-next-converter/tests/react-forwarded-control-parity.test.ts": "8981f02c3714fff7da6f4f759d7279b28954c4d388c7518b912ab9f826ca2d38",
+    "packages/html-next-converter/tests/react-form-parity.test.ts": "f417c39dfc0589044db2fcf127a7c8f13f950aa62e32b1e8e363076777c5eb3a",
+    "CHANGELOG.md": "7eb437f5c1b510696920046aaff1cbf9725f882acca3adf3e958ddac199e2d0d",
+    "packages/html-next-converter/tests/react-form-model-parity.test.ts": "bce4b61c29d9aaf61f44a07a2729032568dd7a446173582d0afd5167a741e7f8",
+    "packages/html-next-converter/tests/react-root-ref-parity.test.ts": "12257186aa53c31a0ab293033c76f27d94df1a2d494a3631cbbc2b725e19ba2e"
+  },
+  "review": {
+    "mode": "one bounded inline source inspection and simplification under the owner single-agent preference",
+    "coverage": [
+      "Generated attribute-object lowering, direct native input ownership and memo comparison.",
+      "Native value/default behavior, controller-assigned fields and authored overrides.",
+      "Ref cleanup, StrictMode remount publication and declaration emit.",
+      "Shared style ref fast path and feature-specific helper elimination."
+    ],
+    "independentReview": false,
+    "wholeGoalReviewComplete": false
+  }
+}

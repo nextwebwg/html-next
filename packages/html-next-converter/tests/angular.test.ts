@@ -60,8 +60,11 @@ it("compiles native-root Angular components and checks consumer input bindings",
   await writeFile(join(root, "ask.js"), angularRequestController);
   await writeFile(join(root, "typed.ts"), angularTypedController);
   await writeFile(join(root, "setup.ts"), angularSetup);
-  await convertComponents({ target: "angular", mode: "library", root, entries: ["controls.html"], outDirectory: join(root, "out") });
+  const keywordFiles = ["a", "b"].map(suffix => `keyword-${suffix}.html`);
+  for (const [index, file] of keywordFiles.entries()) await writeFile(join(root, file), `<template component="ui-keyword-${index}"><defs><prop name="mode" type="keyword" values="one, two" default="one">Mode.</prop></defs><output>{$mode}</output></template>`);
+  await convertComponents({ target: "angular", mode: "library", root, entries: ["controls.html", ...keywordFiles], outDirectory: join(root, "out") });
   const app = `import { Component } from "@angular/core"; import UiAction from "./out/angular/UiAction";
+    import * as Catalog from "./out/angular/index"; void Catalog;
     @Component({selector: "app-root", standalone: true, imports: [UiAction], template: \`<button ui-action [text]="'Send'"></button>\`}) export class App {}`;
   await writeFile(join(root, "app.ts"), app);
   const config = join(root, "tsconfig.json");

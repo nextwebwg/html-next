@@ -1,3 +1,4 @@
+import { ownedEntryIndex } from "./entry-origin.js";
 import { COMPONENT_ROOT_SELECTOR, componentIdentity, componentOwnerSelector } from "./component-identity.js";
 import type { ComponentModule, ControllerModule } from "./controller.js";
 import { activateModule } from "./module-connection.js";
@@ -28,15 +29,16 @@ import {
   evaluateCompiled,
   toAttribute,
   toText,
-  typeCheckedDependencies,
+  type ReferenceChecks,
+  type ReferencePath,
   truthy,
   type Scope,
   type Value,
 } from "./expression.js";
-import { kebabCase, propAttribute } from "./names.js";
+import { asciiLowerCase, kebabCase, propAttribute } from "./names.js";
 import {
   FORM_DEFAULTS_ATTRIBUTE, INSTANCE_ATTRIBUTE, renderedCallerProps, renderedFormMark, renderedInstanceRecord, restoreSerializedFormDefaults, fromCarrier, serverMark, serverRangeAt, serverRanges,
-  currentProjection, regionChanged, slotRegions, switchFallback, withRegionContent,
+  ProjectionClaims, borrowedContent, borrowedRanges, borrowedSlots, currentProjection, releaseContent, writeMark, projectionRejected, rejectProjection, observeRegion, regionChanged, regionStart, slotRegions, slotRegionsEmpty, switchFallback, withRegionContent,
   type HydrationRange, type RenderedInstanceRecord,
 } from "./rendered-form.js";
 import { assignedPropValue, conformsAtDestination, conformsAtReference, invocationValue, reflectedPropValue } from "./prop-values.js";
@@ -47,14 +49,14 @@ import {
   createSignal,
   ReactiveScope,
   readItems,
-  readKey,
   registerReactiveAlias,
   untracked,
-  type ReactiveEffect,
+  ReactiveEffect,
   type ReactiveOwner,
   type ReactiveSignal,
 } from "./reactivity.js";
 import { hasExecutableUrl, isContentOnly, isUrlAttribute, markContentOnly, sanitizeFragment } from "./sanitize.js";
+import { attributeNamespace, writeNamespacedAttribute } from "./dom-attributes.js";
 import {
   addAttributeToken,
   COMPONENT_ATTRIBUTE,
@@ -64,13 +66,16 @@ import {
   type CompiledComponentStyles,
   type ComponentStyleGraph,
   markProjectedRoot,
+  PROJECTED_ATTRIBUTE,
   stateAttribute,
   stateAttributeValue,
 } from "./component-styles.js";
 import {
   declarationTypeNode,
   formatType,
+  normalizeType,
   parseTypedValue,
+  typeAtKey,
   typeCheck,
   type TypeNode,
 } from "./type-system.js";
@@ -91,8 +96,8 @@ import type {
   TemplateNode,
   TextNode,
 } from "./template.js";
-import { definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms } from "./template.js";
-import type { WritablePath } from "./expression.js";
+import { orderedAttributeWrites, repeatedSlotNames, definitionMayInvokeComponents, elementMatchRoot, iteratedRefNames, rootArms, templateForwardsAttributes } from "./template.js";
+import { ITERATION_INDEX, type WritablePath } from "./expression.js";
 import type { ComponentContract, PropValue } from "./types.js";
 import { validateComponentProps, type Validity } from "./validate.js";
 import { manageDerivedValidity, setElementValidity, validityState, type GeneralizedValidityState } from "./validity.js";
@@ -162,6 +167,7 @@ interface PropInput {
 
 interface RuntimeInstance {
   inputPort?: ComponentInputs;
+  readonly attributeInputs: InvocationAttributeInputs;
   inputRevisions?: Map<string, number>;
   controllerInitialized?: boolean;
   element?: Element;
@@ -199,6 +205,8 @@ interface RuntimeInstance {
   readonly delegates: RuntimeInstance[];
   /** What a parent bound on this component's invocation; each follows the root when it is replaced. */
   readonly followers: ((root: Element) => void)[];
+  /** Those bindings, which a replacement of this instance's definition hands to the instance that replaces it. */
+  bindings?: InvocationBinding[];
   /** What the current rendering of the root owns. */
   owned: RenderOwned;
   validityCleanup?: () => void;
@@ -242,6 +250,7 @@ interface InvocationBinding {
   readonly effects: ReactiveEffect[];
   /** Typed inputs survive lowering even when their values have no HTML attribute form. */
   readonly inputs: Map<string, InputSnapshot>;
+  readonly attributes: InvocationAttributeInputs;
   /** Set while those runs re-apply every value, in order, even one a binding already wrote. */
   reapplying?: boolean;
 }
@@ -257,6 +266,7 @@ function committedComponent(root: Element, tag: string): RuntimeInstance | undef
 
 function followComponent(binding: InvocationBinding, component: RuntimeInstance): void {
   binding.component = component;
+  (component.bindings ??= []).push(binding);
   component.followers.push(() => {
     binding.reapplying = true;
     try { for (const effect of binding.effects) effect.execute(); }
@@ -264,13 +274,50 @@ function followComponent(binding: InvocationBinding, component: RuntimeInstance)
   });
 }
 
-/**
- * Where bound values go. Until its component lowers, an invocation's attributes are that component's
- * inputs (a hydrating root is already the component's root); afterwards they go to its current root.
- */
-function valueTarget(element: Element, invocation: InvocationBinding | undefined): Element | undefined {
-  const component = invocation?.component;
-  return component === undefined ? element : untracked(() => component.rootElement.get()) ?? component.element;
+/** The original invocation remains the native storage for its attribute inputs after lowering. */
+interface InvocationAttributeInputs {
+  readonly element: Element;
+  revision?: ReactiveSignal<number>;
+}
+const invocationAttributeInputs = new WeakMap<Element, Map<string, InvocationAttributeInputs>>();
+
+function attributeInputsFor(element: Element, tag: string): InvocationAttributeInputs {
+  let byTag = invocationAttributeInputs.get(element);
+  if (byTag === undefined) invocationAttributeInputs.set(element, byTag = new Map());
+  let inputs = byTag.get(tag);
+  if (inputs === undefined) {
+    const source = element.localName === tag ? element : element.ownerDocument.createElement(tag);
+    if (source !== element) for (const [name, value] of renderedInstanceRecord(element, tag)?.attributes ?? []) {
+      setLiteralAttribute(source, name, value);
+    }
+    inputs = { element: source };
+    byTag.set(tag, inputs);
+  }
+  return inputs;
+}
+
+function notifyAttributeInputs(inputs: InvocationAttributeInputs): void {
+  if (inputs.revision !== undefined) inputs.revision.set(untracked(() => inputs.revision!.get()) + 1);
+}
+
+/** Attribute values belong to the logical invocation; refs and properties follow its rendered root. */
+function valueTarget(element: Element, invocation: InvocationBinding | undefined): Element {
+  return invocation?.attributes.element ?? element;
+}
+
+const attributeForwarding = new WeakMap<ComponentDefinition, boolean>();
+function forwardsAttributes(definition: ComponentDefinition): boolean {
+  let result = attributeForwarding.get(definition);
+  if (result === undefined) {
+    result = templateForwardsAttributes(definition.template);
+    attributeForwarding.set(definition, result);
+  }
+  return result;
+}
+
+function remainingAttributes(inputs: InvocationAttributeInputs, definition: ComponentDefinition): readonly RootAttribute[] {
+  const names = propAttributeNames(definition, false);
+  return Array.from(inputs.element.attributes).filter(attribute => names[asciiLowerCase(attribute.name)] === undefined && attribute.name !== PROJECTED_ATTRIBUTE && attribute.name !== COMPONENT_ATTRIBUTE && attribute.name !== INSTANCE_ATTRIBUTE);
 }
 
 /**
@@ -328,6 +375,7 @@ function runtimeInstance(element: Element): RuntimeInstance | undefined {
 
 /** What a compiled root registers on its lifecycle record: its state spec, raw values and host. */
 interface CompiledHandle {
+  readonly F?: { readonly values: Readonly<Record<string, unknown>> };
   readonly U?: { all(): void; initialized(): readonly string[] };
   readonly S: { readonly n: readonly string[]; readonly g: string; readonly k?: number };
   readonly v: readonly unknown[];
@@ -360,6 +408,7 @@ function compiledRecord(handle: CompiledHandle): RenderedInstanceRecord {
   handle.U?.all();
   const names = Object.keys(handle.B?.D.props ?? {});
   return {
+    ...(handle.F === undefined ? {} : { attributes: Object.entries(handle.F.values).flatMap(([name, value]) => { const text = toAttribute(value as Value, name); return text === null ? [] : [[name, text] as const]; }) }),
     explicit: [...handle.B?.x ?? []],
     inputs: { ...handle.B?.i },
     ...(handle.B?.a === undefined ? {} : { availability: { ...handle.B.a } }),
@@ -552,14 +601,124 @@ function warnUnsupportedTransitions(definition: ComponentDefinition): void {
 
 function registerDefinition(root: Document, registry: DocumentRegistry, tag: string, definition: LiveDefinition): void {
   warnUnsupportedTransitions(definition.definition);
+  const replace = registry.definitions.has(tag);
   registry.definitions.set(tag, definition);
-  if (registry.discoverySelector !== undefined) registry.discoverySelector += `,${tag}`;
+  if (!replace && registry.discoverySelector !== undefined && registry.discoverySelector !== "*") {
+    registry.discoverySelector = boundedDiscoverySelector(`${registry.discoverySelector},${tag}`);
+  }
   registerEntry(root, {
     d: Object.freeze({ tag }),
     p: Object.keys(definition.definition.contract.props),
     c: (props, nodes) => createInstance(root, tag, props, nodes),
     k: definition.wrapper ?? definition.definition,
-  });
+  }, replace);
+}
+
+/** Whether two parsed definitions are the same definition, wherever each was read from. */
+function sameDefinition(left: ComponentDefinition, right: ComponentDefinition): boolean {
+  return JSON.stringify({ ...left, source: undefined }) === JSON.stringify({ ...right, source: undefined });
+}
+
+/**
+ * `define` step 5 for a tag that is already registered: `live` replaces its definition, with its own
+ * styles, and every connected instance re-renders from it.
+ */
+function replaceDefinition(root: Document, registry: DocumentRegistry, live: LiveDefinition, styles = styleGraph(registry, [live.definition])): void {
+  const tag = live.definition.contract.tag;
+  // ponytail: only a style node this tag owns alone goes; a shared graph stylesheet keeps the old rules.
+  root.head.querySelector(`style[data-html-next-component-styles="${tag}"]`)?.remove();
+  const carried = live.style?.localName === "style" ? live.style as HTMLStyleElement : undefined;
+  registerDefinition(root, registry, tag, { ...live, style: installComponentStyles(live.definition, root, carried, undefined, styles) });
+  live.wrapper?.remove();
+  replaceInstances(root, registry, tag);
+}
+
+/**
+ * Rebuilds each connected instance whose root `tag` renders, from the definitions registered now: it
+ * disconnects, its root is built again with its prop inputs, the attributes it received from outside
+ * its template and its projected nodes, and the new root takes the old one's place and connects. The
+ * components its template renders are created and connected with it. A state the new definition
+ * declares under the same name keeps its value when that value has the declared type.
+ */
+function replaceInstances(root: Document, registry: DocumentRegistry, tag: string): void {
+  for (const element of Array.from(root.querySelectorAll(COMPONENT_ROOT_SELECTOR))) {
+    const previous = runtimeInstances.get(element);
+    // A root that another replaced root held has already left the document with it.
+    if (previous === undefined || previous.frameworkOwned || !previous.connected || !element.isConnected || previous.element !== element ||
+      ![previous, ...previous.delegates].some((instance) => instance.definition.contract.tag === tag)) continue;
+    // A component whose root is the replaced one's rebuilds as a whole, with its own definition.
+    const definition = registry.definitions.get(previous.definition.contract.tag)!.definition;
+    const invocation = root.createElement(definition.contract.tag);
+    const carried = carriedAttributes(previous, element);
+    for (const { name, value } of previous.attributeInputs.element.attributes) setLiteralAttribute(invocation, name, value);
+    const props: Record<string, unknown> = {};
+    for (const name of Object.keys(definition.contract.props)) {
+      const input = previous.propInputs[name] === undefined ? undefined : untracked(() => previous.propInputs[name]!.get());
+      if (input?.present !== true) continue;
+      // An input keeps its form: HTML text parses as an attribute does, a value as a framework's prop.
+      if (input.source === "html") invocation.setAttribute(kebabCase(name), String(input.value));
+      else props[name] = input.value;
+    }
+    const rendered = renderedInstances(previous, element);
+    documentState(root).release?.(element);
+    disconnectRuntimeInstance(previous);
+    element.replaceWith(invocation);
+    invocation.append(...previous.projection?.nodes ?? []);
+    const prepared = [prepareRuntimeInvocation(invocation, definition, false, undefined, undefined, false, previous.parent, props)];
+    if (carried.length > 0) {
+      let written: Element | undefined;
+      prepared[0]!.instance.followers.push(next => {
+        if (next === written) return;
+        written = next;
+        carryRootAttributes(next, carried);
+      });
+    }
+    commitRuntimeInvocations(registry, prepared);
+    lowerRenderedComponents(root, registry, prepared);
+    const next = prepared[0]!.instance;
+    applyComponentProps(next, props);
+    // What the parent bound on the old instance's invocation now acts on this one, and follows its root.
+    if (previous.bindings !== undefined) {
+      for (const binding of previous.bindings) binding.component = next;
+      next.bindings = previous.bindings;
+    }
+    next.followers.push(...previous.followers);
+    followRoot(next, untracked(() => next.rootElement.get())!);
+    // The instance, and each component instance its template renders at any depth, keeps its state:
+    // the new template's nth instance of a tag takes the state of the old template's nth instance of it.
+    const before = new Map([previous, ...previous.delegates].map((instance) => [instance.definition.contract.tag, [instance]]));
+    const after = new Map([next, ...next.delegates].map((instance) => [instance.definition.contract.tag, [instance]]));
+    for (const [tag, instances] of renderedInstances(next, untracked(() => next.rootElement.get())!)) after.set(tag, [...after.get(tag) ?? [], ...instances]);
+    for (const [tag, instances] of rendered) before.set(tag, [...before.get(tag) ?? [], ...instances]);
+    for (const [tag, instances] of after) instances.forEach((instance, index) => {
+      const old = before.get(tag)?.[index];
+      if (old !== undefined) carryState(old, instance);
+    });
+  }
+}
+
+/** The component instances `instance`'s template renders under `rootElement`, at any depth and by tag in tree order; not those projected into it. */
+function renderedInstances(instance: RuntimeInstance, rootElement: Element): Map<string, RuntimeInstance[]> {
+  const rendered = new Map<string, RuntimeInstance[]>();
+  const projected = instance.projection?.nodes ?? [];
+  for (const element of Array.from(rootElement.querySelectorAll(COMPONENT_ROOT_SELECTOR))) {
+    const found = runtimeInstances.get(element);
+    if (found === undefined || found.element !== element || projected.some((node) => node.contains(element))) continue;
+    for (const each of [found, ...found.delegates]) {
+      const tag = each.definition.contract.tag;
+      rendered.set(tag, [...rendered.get(tag) ?? [], each]);
+    }
+  }
+  return rendered;
+}
+
+/** Gives `to` each state value of `from` whose name `to` declares, when the value conforms to its declared type. */
+function carryState(from: RuntimeInstance, to: RuntimeInstance): void {
+  for (const declaration of to.definition.declarations ?? []) {
+    if (declaration.kind !== "state" || !from.definition.declarations?.some((kept) => kept.kind === "state" && kept.name === declaration.name)) continue;
+    const value = untracked(() => from.scope.get(declaration.name))!;
+    if (conformsAtDestination(value, declaredTypeAt(to.definition, declaration.name, to.scope))) to.scope.set(declaration.name, value);
+  }
 }
 
 /** `componentRegistry.define(carrier)` steps 2 to 5, with the live delivery's parser. */
@@ -580,10 +739,15 @@ function defineCarrier(root: Document, carrier: HTMLTemplateElement): void {
   if (definition === undefined) return;
   const tag = definition.contract.tag;
   const registry = registryFor(root);
-  if (checkDefinable(root, tag, carrier, () =>
-    JSON.stringify(registry.definitions.get(tag)?.definition) === JSON.stringify(definition))) return;
+  const registered = registry.definitions.get(tag)?.definition;
+  if (checkDefinable(root, tag, carrier, () => registered !== undefined && sameDefinition(registered, definition))) return;
   const style = Array.from(carrier.content.children).find(
     (element): element is HTMLStyleElement => element.localName === "style");
+  if (registered !== undefined) {
+    // ponytail: a replacement applies its styles at once; stylesheet imports it adds load on the next reload.
+    replaceDefinition(root, registry, { wrapper: carrier, style, definition });
+    return;
+  }
   // Stylesheet imports load asynchronously, as a document's own do: the definition registers and lowers
   // now, and its styles apply once its imports are in.
   const deferred = definitionPreparer !== undefined && hasUnresolvedImports(definition.css);
@@ -678,13 +842,19 @@ function liveChannel(element: Element): PropChannel | undefined {
   };
 }
 
+function boundedDiscoverySelector(selector: string): string {
+  // JSDOM's selector engine accepts at most 2048 characters. A large catalog uses native
+  // universal discovery; collect still selects registered tags and rendered roots in DOM order.
+  return selector.length > 2048 ? "*" : selector;
+}
+
 function discoverySelector(registry: DocumentRegistry): string {
   return registry.discoverySelector ??=
-    [
+    boundedDiscoverySelector([
       "template[component]",
       COMPONENT_ROOT_SELECTOR,
       ...Array.from(registry.definitions.keys()),
-    ].join(",");
+    ].join(","));
 }
 
 /**
@@ -758,7 +928,11 @@ export function installComponentGraph(
   for (const node of graph.nodes.values()) {
     if (node.shadowedByCustomElement) continue;
     const tag = node.definition.contract.tag;
-    if (registry.definitions.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
+    const registered = registry.definitions.get(tag)?.definition;
+    if (registered !== undefined) {
+      if (!sameDefinition(registered, node.definition)) replaceDefinition(root, registry, { definition: node.definition, style: undefined }, styles);
+      continue;
+    }
     const style = installComponentStyles(node.definition, root, undefined, undefined, styles);
     registerDefinition(root, registry, tag, {
       definition: node.definition,
@@ -832,6 +1006,10 @@ function componentScope(
       declaration.kind === "state" || declaration.kind === "computed" ||
       declaration.kind === "data"
     ) scope.set(declaration.name, null);
+  }
+  // An `as` list is filled from the projection before the template renders (installAcceptedChildren).
+  for (const slot of definition.contract.slots === undefined ? [] : Object.values(definition.contract.slots)) {
+    if (slot.as !== undefined) scope.set(slot.as, []);
   }
   for (const script of definition.scripts ?? []) {
     if (script.name !== undefined) scope.set(script.name, { pending: false, ok: false, error: null });
@@ -923,7 +1101,6 @@ function readInvocation(
   frameworkProps?: Readonly<Record<string, unknown>>,
 ): {
   readonly scope: ReactiveScope;
-  readonly passThrough: readonly RootAttribute[];
   readonly effects: ReactiveOwner[];
   readonly explicit: Set<string>;
   readonly propInputs: Readonly<Record<string, ReactiveSignal<PropInput>>>;
@@ -934,13 +1111,9 @@ function readInvocation(
     ? renderedInstanceRecord(invocation, contract.tag) : undefined;
   const names = propAttributeNames(definition, hydration);
   const incoming = Object.create(null) as Record<string, IncomingProp>;
-  const passThrough: Attr[] = [];
   for (const attribute of Array.from(invocation.attributes)) {
-    const propName = restored === undefined ? names[attribute.name.toLowerCase()] : undefined;
-    if (propName === undefined) {
-      if (!hydration) passThrough.push(attribute);
-      continue;
-    }
+    const propName = restored === undefined ? names[asciiLowerCase(attribute.name)] : undefined;
+    if (propName === undefined) continue;
     incoming[propName] = { value: attribute.value, source: "html", attributePresent: !hydration };
   }
   if (restored !== undefined) {
@@ -1060,7 +1233,7 @@ function readInvocation(
       untracked(() => resource.update(parameters));
     }, 0, active));
   }
-  return { scope, passThrough, effects, explicit, propInputs,
+  return { scope, effects, explicit, propInputs,
     ...(restored?.revisions === undefined ? {} : { inputRevisions: new Map(Object.entries(restored.revisions)) }) };
 }
 
@@ -1084,70 +1257,9 @@ function evalValue(expression: string, scope: Scope): Value {
   }
 }
 
-/** A path an expression reads that a declaration constrains, and its type. */
-type ConstrainedReference = readonly [path: string, type: TypeNode];
+/** Each immutable type layer shares metadata checks without retaining instance values. */
+const referenceChecks = new WeakMap<object, WeakMap<CompiledExpression, ReferenceChecks>>();
 
-/** Paths an expression reads that a declaration constrains, resolved once per definition. */
-const constrainedPaths = new WeakMap<ComponentDefinition, Map<string, readonly ConstrainedReference[]>>();
-
-/**
- * The value at a dependency path. A path names both a list index and a record key as a segment
- * (`items.0`, `byId.42`), so each segment is read the way the value in hand reads it.
- */
-function readPath(path: string, scope: ReactiveScope): Value {
-  const [root, ...keys] = path.split(".");
-  let value = scope.read(root!);
-  for (const key of keys) {
-    if (Array.isArray(value)) {
-      value = key === "length" || /^\d+$/.test(key) ? readKey(value, key === "length" ? key : Number(key)) : undefined;
-    } else if (typeof value === "string" && key === "length") {
-      value = value.length;
-    } else if (typeof value === "object" && value !== null) {
-      value = readKey(value, key);
-    } else {
-      return ABSENT;
-    }
-  }
-  return value ?? ABSENT;
-}
-
-function constrainedReferences(
-  definition: ComponentDefinition,
-  expression: string,
-): readonly ConstrainedReference[] {
-  let cache = constrainedPaths.get(definition);
-  if (cache === undefined) {
-    cache = new Map();
-    constrainedPaths.set(definition, cache);
-  }
-  const known = cache.get(expression);
-  if (known !== undefined) return known;
-  let paths: readonly ConstrainedReference[] = [];
-  try {
-    paths = typeCheckedDependencies(expression).flatMap((path) => {
-      const type = declaredTypeAt(definition, path);
-      return type === undefined ? [] : [[path, type] as const];
-    });
-  } catch { /* an unreadable expression fails where it is evaluated, not here */ }
-  cache.set(expression, paths);
-  return paths;
-}
-
-/**
- * Whether a value satisfies the type declared for the reference that read it.
- *
- * A reference is checked against its own type, not its subtree: a list reference needs a list, and
- * whether an item's field satisfies its own type is that field reference's business. That keeps the
- * check constant-time on a hot path, and keeps one bad row from silencing a reference to the list.
- */
-/**
- * Evaluates a binding expression, or leaves it inert when a reference fails its declared type.
- *
- * A reference is checked where it is read, not where its value arrived, so a payload stays exactly
- * as it came back and only the references into its offending part go inert. Callers keep whatever
- * they last had: a binding does not write, and a computed does not recompute, so nothing downstream
- * of a broken contract moves.
- */
 const reportedAuthoredWarnings = new WeakMap<ComponentDefinition, Set<string>>();
 
 function warnAuthored(definition: ComponentDefinition, location: string, message: string): void {
@@ -1158,18 +1270,50 @@ function warnAuthored(definition: ComponentDefinition, location: string, message
   console.warn(`${definition.source.file}: HR007: ${message}`);
 }
 
-function conformingReferences(source: string, scope: ReactiveScope, definition: ComponentDefinition): boolean {
-  for (const [path, type] of constrainedReferences(definition, source)) {
-    const value = readPath(path, scope);
-    // Absence is not a violation: a value that is not there yet has nothing to conform to.
-    if (value === ABSENT || value === undefined) continue;
-    const selectedType = definition.contract.props[path.split(".")[0]!]?.select === undefined
-      ? type : declaredTypeAt(definition, path, scope);
-    if (selectedType === undefined || conformsAtReference(value, selectedType)) continue;
-    warnAuthored(definition, `expression:${source}:${path}`, `Reference \`${path}\` must satisfy ${formatType(selectedType)}.`);
-    return false;
-  }
-  return true;
+function checksFor(expression: CompiledExpression, scope: ReactiveScope, definition: ComponentDefinition): ReferenceChecks {
+  const resolver = scope.typeOfDeclaredPath;
+  const key = resolver ?? definition;
+  let cache = referenceChecks.get(key);
+  if (cache === undefined) referenceChecks.set(key, cache = new WeakMap());
+  const known = cache.get(expression);
+  if (known !== undefined) return known;
+  const types = new WeakMap<ReferencePath, { type: TypeNode | undefined; selected: boolean }>();
+  const checks: ReferenceChecks = {
+    typeOf(reference, values) {
+      let known = types.get(reference);
+      if (known === undefined) {
+        const selected = definition.contract.props[reference.root]?.select !== undefined;
+        let type = selected ? undefined : resolver === undefined
+          ? declaredTypeAt(definition, reference.root) : resolver(reference.root);
+        if (!selected) for (const step of reference.staticKeys ?? []) {
+          if (type === undefined) break;
+          type = typeAtKey(type, step);
+        }
+        known = { type, selected };
+        types.set(reference, known);
+      }
+      if (!known.selected) return known.type;
+      const selected = (): TypeNode | undefined => {
+        let type = resolver === undefined ? declaredTypeAt(definition, reference.root, values) : resolver(reference.root, values);
+        for (const step of reference.staticKeys ?? []) {
+          if (type === undefined) break;
+          type = typeAtKey(type, step);
+        }
+        return type;
+      };
+      return observingInputs() ? withoutInputObservation(selected) : selected();
+    },
+    atKey: typeAtKey,
+    accepts(reference, value, type) {
+      if (value === NONCONFORMING) return false;
+      if (value === ABSENT || value === null || type === undefined || conformsAtReference(value, type)) return true;
+      warnAuthored(definition, `expression:${expression.source}:${reference.name}`,
+        `Reference \`${reference.name}\` must satisfy ${formatType(type)}.`);
+      return false;
+    },
+  };
+  cache.set(expression, checks);
+  return checks;
 }
 
 function evalConforming(
@@ -1177,13 +1321,9 @@ function evalConforming(
   scope: ReactiveScope,
   definition: ComponentDefinition,
 ): Value | typeof NONCONFORMING {
-  const source = typeof expression === "string" ? expression : expression.source;
-  const conforms = observingInputs()
-    ? withoutInputObservation(() => conformingReferences(source, scope, definition))
-    : conformingReferences(source, scope, definition);
-  if (!conforms) return NONCONFORMING;
   try {
-    return evaluateCompiled(typeof expression === "string" ? compileExpression(expression) : expression, scope);
+    const compiled = typeof expression === "string" ? compileExpression(expression) : expression;
+    return evaluateCompiled(compiled, scope, compiled.dependencies.length === 0 ? undefined : checksFor(compiled, scope, definition));
   } catch (error) {
     if (error instanceof UndeclaredName) fail("HB001", error.message);
     throw error;
@@ -1270,6 +1410,11 @@ function ownedContext(context: RuntimeRenderContext, owned: RenderOwned): Runtim
 
 interface RuntimeRenderContext {
   readonly definition: ComponentDefinition;
+  readonly asScope?: ReactiveScope;
+  readonly claimedSlot?: SlotNode;
+  readonly sharedProjection?: true;
+  readonly plainProjection?: { claims?: ProjectionClaims };
+  readonly attributeInputs?: InvocationAttributeInputs;
   owned: RenderOwned;
   readonly refs: Record<string, Element | Element[]>;
   readonly selection?: {
@@ -1288,12 +1433,14 @@ interface RuntimeRenderContext {
   committed: boolean;
   /** Server slot ranges, consumed in template order while hydrating. */
   hydrationRanges?: HydrationRange[] | undefined;
+  /** Server ranges `<slot of>` outlets rendered (`of` on their start mark), consumed in template order while hydrating. */
+  childRanges?: HydrationRange[] | undefined;
   /** SVG while rendering inside an `<svg>` subtree (outside `<foreignObject>`); otherwise HTML. */
   readonly namespace?: typeof SVG_NAMESPACE;
 }
 
 interface ProjectedTemplate {
-  readonly children: readonly TemplateNode[];
+  readonly node: ElementNode;
   readonly scope: ReactiveScope;
   readonly context: RuntimeRenderContext;
 }
@@ -1550,10 +1697,23 @@ function bindEvents(
 
 function setAttribute(element: Element, name: string, value: string | null): void {
   name = attributeNameFor(element, name);
-  if (value === null || (isUrlAttribute(name) && hasExecutableUrl(value))) {
+  const namespace = attributeNamespace(name);
+  if (namespace !== undefined) {
+    writeNamespacedAttribute(element, namespace, name, name.slice(name.indexOf(":") + 1), value !== null && isUrlAttribute(name) && hasExecutableUrl(value) ? null : value);
+    return;
+  }
+  if (value !== null && isUrlAttribute(name) && hasExecutableUrl(value)) value = null;
+  if (element.getAttribute(name) === value) return;
+  if (value === null) {
     element.removeAttribute(name);
   }
   else element.setAttribute(name, value);
+}
+
+function setLiteralAttribute(element: Element, name: string, value: string): void {
+  const namespace = attributeNamespace(name);
+  if (namespace === undefined) element.setAttribute(name, value);
+  else element.setAttributeNS(namespace, name, value);
 }
 
 /**
@@ -1590,12 +1750,13 @@ function shapeList(
   items: readonly Value[],
   flow: Extract<Flow, { kind: "each" }>,
   scope: ReactiveScope,
+  itemTypes: Readonly<Record<string, TypeNode | undefined>>,
 ): Value[] {
   // Rows stay plain: tracked like the proxy's reads, but no row ever needs its own proxy.
   let result = readItems(items);
   if (flow.where !== undefined) {
     const where = flow.where;
-    result = result.filter((item) => truthy(evalValue(where, layer(scope, { [flow.item]: item }))));
+    result = result.filter((item) => truthy(evalValue(where, typedLayer(scope, { [flow.item]: item }, itemTypes))));
   }
   if (flow.sortKeys !== undefined) {
     // A `$sort` key is a path from the loop item (unlike `$key`, which is an expression):
@@ -1646,8 +1807,9 @@ function existingDynamicRange(candidate: Node | undefined): readonly [Comment, C
   return undefined;
 }
 
-function rangeNodes(start: Comment, end: Comment): Node[] {
+function rangeNodes(start: Node, end: Node): Node[] {
   const nodes: Node[] = [start];
+  if (start === end) return nodes;
   for (let node = start.nextSibling; node !== null; node = node.nextSibling) {
     nodes.push(node);
     if (node === end) break;
@@ -1727,7 +1889,7 @@ function renderDynamicNode(
     }
     if (slotted) markRegionContent(start, output);
     end.before(...output);
-    if (slotted) regionChanged(start);
+    regionChanged(start);
     built = chosen;
     syncContainingSelect(end);
   });
@@ -1882,6 +2044,9 @@ function renderEachRegion(
   const flow = node.flow as Extract<Flow, { kind: "each" }>;
   const listType = declaredExpressionType(flow.listPlan ?? flow.list, scope);
   const itemType = listType?.kind === "list" ? listType.item : undefined;
+  const whereTypes = { [flow.item]: itemType };
+  const itemTypes: Readonly<Record<string, TypeNode | undefined>> = flow.index === undefined ? whereTypes
+    : { ...whereTypes, [flow.index]: { kind: "terminal", name: "number" } };
   const existing = context.committed ? existingEachRange(candidate, "each") : undefined;
   const start = existing?.[0] ?? document.createComment("html-next:each-start");
   const end = existing?.[1] ?? document.createComment("html-next:each-end");
@@ -1909,7 +2074,7 @@ function renderEachRegion(
         if (root !== undefined && root !== flow.index) {
           // Keep one scheduler group when another binding on this element reads the same root;
           // otherwise routing only the class effect would change authored attribute creation order.
-          const shared = element.attributes.some((other) => other.kind !== "literal" &&
+          const shared = element.attributes.some((other) => other.kind !== "literal" && other.kind !== "forward" &&
             other.expressionPlan?.dependencies.some((path) => path === root || path.startsWith(`${root}.`)) === true &&
             (other.kind !== "attribute" || other.target !== "class" ||
               keyedEquality(other.expressionPlan.ast, flow.keyPlan!.ast, flow.item) !== root));
@@ -1929,7 +2094,7 @@ function renderEachRegion(
   ownEffect(context, scope, () => {
     const value = evalConforming(flow.list, scope, context.definition);
     if (value === NONCONFORMING) return;
-    const items = Array.isArray(value) ? shapeList(value, flow, scope) : [];
+    const items = Array.isArray(value) ? shapeList(value, flow, scope, whereTypes) : [];
     const next = new Map<unknown, EachBlock>();
     const keyed = flow.key !== undefined;
     const ordered: EachBlock[] | undefined = keyed ? [] : undefined;
@@ -1939,19 +2104,19 @@ function renderEachRegion(
       const item = items[index]!;
       const locals: Record<string, Value> = {
         [flow.item]: item,
-        loop: { index, first: index === 0, last: index === items.length - 1, count: items.length },
+        [ITERATION_INDEX]: index,
       };
       if (flow.index !== undefined) locals[flow.index] = index;
       let local: ReactiveScope | undefined;
       let key: unknown = index;
       if (flow.key !== undefined) {
-        local = typedLayer(scope, locals, { [flow.item]: itemType });
+        local = typedLayer(scope, locals, itemTypes);
         key = evalValue(flow.key, local);
       }
       if (next.has(key)) fail("HR004", `A keyed list produced duplicate key \`${toText(key as Value)}\`.`);
       let block = blocks.get(key);
       if (block === undefined) {
-        local ??= typedLayer(scope, locals, { [flow.item]: itemType });
+        local ??= typedLayer(scope, locals, itemTypes);
         const owned = renderOwned(context.owned);
         const blockContext = ownedContext(rowContext, owned);
         const adopted = adopting[adoptionIndex++];
@@ -1980,15 +2145,7 @@ function renderEachRegion(
         previous?.push(block.position);
         block.scope.set(flow.item, item);
         if (flow.index !== undefined) block.scope.set(flow.index, index);
-        // A row's loop fields change one by one, so a reader of one that holds does not run again;
-        // a row whose position and count hold writes nothing.
-        const rowScope = block.scope;
-        const next = locals.loop as Record<string, Value>;
-        const plain = untracked(() => rowScope.read("loop")) as Record<string, Value>;
-        if (plain.index !== next.index || plain.first !== next.first || plain.last !== next.last || plain.count !== next.count) {
-          const loop = untracked(() => rowScope.get("loop")) as Record<string, Value>;
-          loop.index = next.index!; loop.first = next.first!; loop.last = next.last!; loop.count = next.count!;
-        }
+        block.scope.set(ITERATION_INDEX, index);
       }
       next.set(key, block);
       ordered?.push(block);
@@ -2016,7 +2173,7 @@ function renderEachRegion(
     if (ordered !== undefined) for (let index = 0; index < ordered.length; index += 1) ordered[index]!.position = index;
     blocks = next;
     syncContainingSelect(end);
-    if (slotted) regionChanged(start);
+    regionChanged(start);
   });
   for (const root of roots) {
     let previous: Value | typeof NONCONFORMING | undefined = ABSENT;
@@ -2133,8 +2290,8 @@ function bindElement(
 }
 
 /**
- * Bind a template-component invocation through the component that lowers there: props reach the
- * component, and everything else its current root. The component may already own `element` when
+ * Bind a template-component invocation: declared props reach the component and unclaimed attributes
+ * remain available for explicit `$attributes` forwarding. The component may already own `element` when
  * it was adopted in an earlier pass; otherwise lowering claims these bindings.
  */
 function bindInvocation(
@@ -2145,7 +2302,7 @@ function bindInvocation(
   awaitsLowering: boolean,
 ): InvocationBinding {
   const invocation: InvocationBinding = {
-    tag: node.name, awaitsLowering, component: committedComponent(element, node.name), effects: [], inputs: new Map(),
+    tag: node.name, awaitsLowering, attributes: attributeInputsFor(element, node.name), component: committedComponent(element, node.name), effects: [], inputs: new Map(),
   };
   if (node.ref !== undefined) {
     const ref = node.ref;
@@ -2186,6 +2343,29 @@ function claimInvocationBindings(element: Element, component: RuntimeInstance): 
   return claimed.length > 0;
 }
 
+/** A forwarded or literal HTML input still passes through the receiving component's prop contract. */
+function writeInvocationAttribute(element: Element, invocation: InvocationBinding | undefined, name: string, value: string | null): void {
+  const target = valueTarget(element, invocation);
+  const previous = target.getAttribute(name);
+  setAttribute(target, name, value);
+  if (invocation === undefined) return;
+  const child = invocation.component;
+  const definition = child?.definition ?? registryFor(element.ownerDocument).definitions.get(invocation.tag)?.definition;
+  const propName = definition === undefined ? undefined : propAttributeNames(definition, false)[asciiLowerCase(name)];
+  if (propName !== undefined) {
+    invocation.inputs.delete(propName);
+    if (child !== undefined) {
+      const prop = definition!.contract.props[propName]!;
+      const selected = selectedPropType(definition!.contract, prop, { [prop.select?.from ?? propName]: untracked(() => child.scope.get(prop.select?.from ?? propName)) });
+      const parsed = invocationValue(prop, value, "html", value !== null, selected);
+      if (parsed !== undefined) applyComponentProps(child, { [propName]: parsed });
+      child.propInputs[propName]!.set({ value, source: "html", present: value !== null, provided: value !== null });
+    }
+  } else if (previous !== target.getAttribute(name)) notifyAttributeInputs(invocation.attributes);
+}
+
+const orderedRootOutputs = new WeakMap<Element, Map<string, string | null>>();
+
 /** Install the existing attribute/property bindings on an element, or on an invocation's component. */
 function bindElementAttributes(
   element: Element,
@@ -2194,25 +2374,76 @@ function bindElementAttributes(
   context: RuntimeRenderContext,
   invocation?: InvocationBinding,
 ): void {
+  const forwarded = node.attributes.some(attribute => attribute.kind === "forward");
+  const ordered = orderedAttributeWrites(node.attributes, invocation !== undefined);
+  let modified = 0;
+  if (invocation !== undefined) for (const attribute of node.attributes) {
+    if (attribute.kind === "attribute" && attribute.target !== undefined) modified |= attribute.target === "class" ? 1 : 2;
+  }
+  const runs: Array<() => void | (() => void)> = [];
+  const resets: Array<() => void> = [];
+  const rootOutputs = ordered && node === context.rootNode ? new Map<string, string | null>() : undefined;
+  let generation = 0;
+  const group = ordered ? new ReactiveEffect(scope.scheduler, () => {
+    context.attributeInputs?.revision?.get();
+    generation += 1;
+    for (const reset of resets) reset();
+    for (const run of runs) run();
+    if (rootOutputs !== undefined) {
+      rootOutputs.clear();
+      for (const attribute of node.attributes) {
+        if (attribute.kind === "literal" || attribute.kind === "attribute") {
+          const name = attribute.kind === "attribute" ? attribute.target ?? attribute.name : attribute.name;
+          rootOutputs.set(name, valueTarget(element, invocation).getAttribute(name));
+        } else if (attribute.kind === "forward") {
+          for (const { name } of context.attributeInputs === undefined ? [] : remainingAttributes(context.attributeInputs, context.definition)) {
+            rootOutputs.set(name, valueTarget(element, invocation).getAttribute(name));
+          }
+        }
+      }
+      orderedRootOutputs.set(element, rootOutputs);
+    }
+  }, 1) : undefined;
+  if (group !== undefined) { context.owned.add(group); invocation?.effects.push(group); }
   const own = (run: () => void | (() => void), priority?: number): ReactiveEffect => {
+    if (group !== undefined && priority === undefined) { runs.push(run); return group; }
     const effect = ownEffect(context, scope, run, priority);
     invocation?.effects.push(effect);
     return effect;
   };
   for (const attribute of node.attributes) {
-    if (attribute.kind === "attribute") {
+    if (attribute.kind === "forward") {
+      let previous = new Set<string>();
+      resets.push(() => {
+        const current = new Set(context.attributeInputs === undefined ? [] : remainingAttributes(context.attributeInputs, context.definition).map(attribute => attribute.name));
+        for (const name of previous) if (!current.has(name)) writeInvocationAttribute(element, invocation, name, null);
+      });
+      own(() => {
+        const given = context.attributeInputs === undefined ? [] : remainingAttributes(context.attributeInputs, context.definition);
+        const current = new Set(given.map(attribute => attribute.name));
+        for (const attribute of given) writeInvocationAttribute(element, invocation, attribute.name, attribute.value);
+        previous = current;
+      });
+    } else if (attribute.kind === "literal" && ordered) {
+      if (node.attributes.some(binding => binding.kind === "attribute" && binding.target === undefined && binding.name === attribute.name)) continue;
+      own(() => writeInvocationAttribute(element, invocation, attribute.name, attribute.value));
+    } else if (attribute.kind === "attribute") {
       const selection = invocation === undefined && attribute.target === "class" &&
         scope.parent === context.selection?.scope ? context.selection : undefined;
       const root = attribute.expressionPlan === undefined ? undefined : selection?.bindings.get(attribute.expressionPlan);
       // What this binding last wrote, and where: a component's root switch gives it a new target.
       let written: Element | undefined;
       let last: unknown;
+      let lastRevision: number | undefined;
+      const fallback = attribute.target === undefined ? node.attributes.find(other => other.kind === "literal" && other.name === attribute.name) : undefined;
+      let accepted: Value | typeof NONCONFORMING = forwarded && fallback?.kind === "literal" ? fallback.value : NONCONFORMING;
       const effect = own(() => {
+        const currentRevision = ordered ? generation : undefined;
         const child = invocation?.component;
         const definition = invocation === undefined ? undefined
           : child?.definition ?? registryFor(element.ownerDocument).definitions.get(invocation.tag)?.definition;
-        const propName = definition === undefined || attribute.target !== undefined
-          ? undefined : propAttributeNames(definition, false)[attribute.name.toLowerCase()];
+        const propName = definition === undefined || attribute.target !== undefined || attribute.name === "class" && (modified & 1) !== 0 || attribute.name === "style" && (modified & 2) !== 0
+          ? undefined : propAttributeNames(definition, false)[asciiLowerCase(attribute.name)];
         const expression = attribute.expressionPlan ?? compileExpression(attribute.expression);
         const evaluated = propName !== undefined && expression.ast.kind !== "id" && expression.dependencies.length > 0
           ? evaluateInput(() => evalConforming(expression, scope, context.definition), READY_INPUT, NONCONFORMING) : undefined;
@@ -2249,7 +2480,10 @@ function bindElementAttributes(
         }
         // A reference that broke its declared type writes nothing, so this binding keeps whatever
         // it last rendered rather than showing a value the declaration forbids.
-        if (value === NONCONFORMING) return;
+        if (value === NONCONFORMING) {
+          if (!ordered || accepted === NONCONFORMING) return;
+          value = accepted;
+        } else accepted = value;
         // A component owns its props: write them through the same channel framework adapters use,
         // so the component re-parses the declared type and reflects the value itself.
         if (propName !== undefined) {
@@ -2268,22 +2502,30 @@ function bindElementAttributes(
           // A server-rendered root carries its serialized props; they replay when it is adopted.
           if (element.localName !== node.name) return;
         }
-        const target = valueTarget(element, invocation);
-        if (target === undefined) return;
         // A bound control's value is a property write, made each time; native form-control
         // properties carry the live value, so there is no duplicate attribute write.
-        if (attribute.twoWay === true && applyBoundControlValue(target, attribute.name, value)) return;
+        if (attribute.twoWay === true) {
+          const control = rootTarget(element, invocation);
+          if (control !== undefined && applyBoundControlValue(control, attribute.name, value)) return;
+        }
+        const target = valueTarget(element, invocation);
         // Attribute, class and style bindings write only a result that differs from their last.
         const output = attribute.target === "class" ? truthy(value)
           : attribute.target === "style" ? toText(value) : toAttribute(value, attribute.name);
-        if (target === written && output === last && invocation?.reapplying !== true) return;
+        if (target === written && output === last && currentRevision === lastRevision && invocation?.reapplying !== true) return;
         written = target;
         last = output;
+        lastRevision = currentRevision;
+        const before = invocation === undefined ? undefined : target.getAttribute(attribute.target ?? attribute.name);
         if (attribute.target === "class") target.classList.toggle(attribute.name, output as boolean);
         else if (attribute.target === "style") (target as HTMLElement).style.setProperty(attribute.name, output as string);
         else setAttribute(target, attribute.name, output as string | null);
+        if (invocation !== undefined && before !== target.getAttribute(attribute.target ?? attribute.name)) {
+          if (attribute.target !== undefined) writeInvocationAttribute(element, invocation, attribute.target, target.getAttribute(attribute.target));
+          notifyAttributeInputs(invocation.attributes);
+        }
       });
-      if (root !== undefined) indexedSelections.set(effect, selectedRoot(root));
+      if (root !== undefined && !ordered) indexedSelections.set(effect, selectedRoot(root));
       if (attribute.twoWay === true && attribute.writablePath !== undefined) {
         own(() => {
           const target = rootTarget(element, invocation);
@@ -2314,6 +2556,7 @@ function bindElementAttributes(
     }
     // Content directives are handled by the renderer.
   }
+  group?.execute();
 }
 
 /** Bind one authored text node, retaining nonconforming segments exactly as before. */
@@ -2385,8 +2628,8 @@ function nativeTemplatePlan(
         !cloneableNativeElements.has(candidate.name)) return false;
     if (candidate.attributes.some((attribute) =>
       attribute.kind === "property" ||
-      attribute.kind === "attribute" && (attribute.twoWay === true || attribute.name.toLowerCase() === "is") ||
-      attribute.kind === "literal" && (attribute.name.toLowerCase() === "is" || /^on/i.test(attribute.name))
+      attribute.kind === "attribute" && (attribute.twoWay === true || asciiLowerCase(attribute.name) === "is") ||
+      attribute.kind === "literal" && (asciiLowerCase(attribute.name) === "is" || /^on/i.test(attribute.name))
     )) return false;
     const directive = candidate.attributes.find((attribute): attribute is DirectiveAttribute => attribute.kind === "directive");
     // Content directives ignore authored descendants in the ordinary renderer too.
@@ -2409,9 +2652,9 @@ function nativeTemplatePlan(
     const elementNode = candidate as ElementNode;
     const element = createTemplateElement(document, elementNode.name, context);
     for (const attribute of elementNode.attributes) {
-      if (attribute.kind === "literal") element.setAttribute(attribute.name, attribute.value);
+      if (attribute.kind === "literal") setLiteralAttribute(element, attribute.name, attribute.value);
     }
-    if (elementNode.attributes.some((attribute) => attribute.kind === "attribute")) {
+    if (elementNode.attributes.some((attribute) => attribute.kind === "attribute" || attribute.kind === "forward")) {
       actions.push({ kind: "attributes", path, node: elementNode });
     }
     const directive = elementNode.attributes.find((attribute): attribute is DirectiveAttribute => attribute.kind === "directive");
@@ -2448,10 +2691,7 @@ function instantiateNativeTemplate(
     return target;
   });
   if (node === context.rootNode) context.root = element;
-  for (const attribute of passThrough) {
-    const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
-    element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
-  }
+  carryRootAttributes(element, passThrough);
   for (let index = 0; index < plan.actions.length; index += 1) {
     const action = plan.actions[index]!;
     const target = sites[index]!;
@@ -2485,7 +2725,8 @@ function renderInstance(
       const carrier = candidate instanceof HTMLTemplateElement && candidate.getAttribute("slot") === slot.value
         ? candidate : document.createElement("template");
       carrier.setAttribute("slot", slot.value);
-      projectedTemplates.set(carrier, { children: node.children, scope, context });
+      if (carrier !== candidate && node.slotContent !== undefined) carrier.innerHTML = node.slotContent;
+      projectedTemplates.set(carrier, { node, scope, context });
       return [carrier];
     }
     if (contentDirective !== undefined) {
@@ -2546,16 +2787,16 @@ function renderInstance(
     bindEvents(candidate, node, scope, context, invocation);
     settleInvocation(candidate, invocation);
     // On a shared root, this component's own ranges and carrier, not those of the components it delegates to.
+    const borrowed = borrowedSlots(candidate);
     const nested = serverRanges(candidate, false, node.name);
     const slotOf = (child: TemplateNode): string => child.kind === "element"
       ? child.attributes.find((attribute): attribute is LiteralAttribute => attribute.kind === "literal" && attribute.name === "slot")?.value ?? ""
       : "";
     const scopedTemplate = (child: TemplateNode): child is ElementNode => child.kind === "element" && child.name === "template" &&
       child.attributes.some((attribute) => attribute.kind === "literal" && attribute.name === "slot");
-    const rendered = nested?.ranges.filter((range) => !range.fallback) ?? [];
+    const rendered = [...nested?.ranges.filter((range) => !range.fallback) ?? [], ...borrowed];
     const walk = (children: readonly TemplateNode[], existing: readonly Node[]): void => {
-      let cursor = 0;
-      for (const child of children) cursor += renderTemplateNode(child, scope, document, context, existing[cursor]).length;
+      renderChildren(children, scope, document, context, existing[0]);
     };
     for (const child of node.children) {
       if (!scopedTemplate(child)) continue;
@@ -2568,7 +2809,7 @@ function renderInstance(
     // A range showing its fallback ends with the marks of this slot's regions that render nothing, two each.
     for (const range of nested?.ranges ?? []) {
       const regions = node.children.filter((child) => !scopedTemplate(child) && slotOf(child) === range.slot);
-      if (!range.fallback || range.scoped || regions.length === 0 || !regions.every((child) => child.kind === "element" && child.flow !== undefined)) continue;
+      if (renderedSlots.has(range.slot) || !range.fallback || range.scoped || regions.length === 0 || !regions.every((child) => child.kind === "element" && child.flow !== undefined)) continue;
       walk(regions, range.content.slice(-2 * regions.length));
       renderedSlots.add(range.slot);
     }
@@ -2594,15 +2835,15 @@ function renderInstance(
         ? { selectionStart: element.selectionStart, selectionEnd: element.selectionEnd }
         : {}),
     } : undefined;
-  // An adopted root already holds its literals merged with its invocation's attributes, which win
-  // (class and style combine), so only a literal it lacks is written. A root control's default
+  // An adopted root already holds the server's ordered literal and forwarded attribute writes,
+  // so only a literal it lacks is written. A root control's default
   // value and checkedness are the template's again once adopted (below), so those are written.
   const adoptedRoot = adopted && node === context.rootNode;
   const resetDefault = (name: string): boolean => (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
     (name === "value" || name === "checked");
   for (const attribute of node.attributes) {
     if (attribute.kind === "literal" && !(adoptedRoot && element.hasAttribute(attribute.name) && !resetDefault(attribute.name))) {
-      element.setAttribute(attribute.name, attribute.value);
+      setLiteralAttribute(element, attribute.name, attribute.value);
     }
   }
   // Serialized live control values use HTML's default-value attributes until hydration. Once
@@ -2623,12 +2864,7 @@ function renderInstance(
       element.removeAttribute("selected");
     }
   }
-  // The invocation's attributes win over the template's literals; class and style combine. Bound
-  // attributes, applied next, are the component's own output.
-  for (const attribute of passThrough) {
-    const own = attribute.name === "class" || attribute.name === "style" ? element.getAttribute(attribute.name) : null;
-    element.setAttribute(attribute.name, own === null || own === "" ? attribute.value : `${own}${attribute.name === "class" ? " " : "; "}${attribute.value}`);
-  }
+  carryRootAttributes(element, passThrough);
   // A component may lower onto any custom-element name. Lowering replaces a registered component's
   // invocation, so nothing attaches to it; an unregistered one keeps its bindings until claimed.
   const invocation = elementName.includes("-") && document.defaultView?.customElements.get(elementName) === undefined
@@ -2753,6 +2989,498 @@ function projectedSlotName(node: Node, context: RuntimeRenderContext): string {
     (node instanceof Element ? node.getAttribute("slot") ?? "" : "");
 }
 
+/**
+ * Renders a consumer's `<template slot>` at an outlet: lazily, like an `$if` body, in the consumer's
+ * scope plus the outlet's slot props, and afresh each time.
+ */
+function renderScopedTemplate(
+  carrier: HTMLTemplateElement,
+  name: string,
+  props: NonNullable<SlotNode["props"]>,
+  scope: ReactiveScope,
+  document: Document,
+  context: RuntimeRenderContext,
+  existing?: readonly Node[],
+): Node[] {
+  const authored = projectedTemplates.get(carrier);
+  if (authored === undefined && projectedSlotParser === undefined) {
+    fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
+  }
+  const content = authored?.node.children ?? projectedSlotParser!(carrier, context.definition, props.map((prop) => prop.name));
+  const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
+  // A `<slot>` in the template is the consumer's outlet, so it reads the consumer's projection and
+  // server ranges: read here, a same-name outlet would find this carrier again and render it without end.
+  const projectionContext = authored === undefined ? context : Object.create(context, {
+    definition: { value: authored.context.definition, enumerable: true },
+    asScope: { value: authored.context.asScope, enumerable: true },
+    sharedProjection: { value: authored.context.sharedProjection, enumerable: true },
+    plainProjection: { value: authored.context.plainProjection, enumerable: true },
+    refs: { value: authored.context.refs, enumerable: true },
+    attributeInputs: { value: authored.context.attributeInputs, enumerable: true },
+    projectedNodes: { value: authored.context.projectedNodes, enumerable: true },
+    projectedSlotNames: { value: authored.context.projectedSlotNames, enumerable: true },
+    hydrationRanges: { get: () => authored.context.hydrationRanges, enumerable: true },
+  }) as RuntimeRenderContext;
+  for (const prop of props) {
+    projectedScope.set(prop.name, (prop.default ?? null) as Value);
+    ownEffect(context, scope, () => {
+      const value = evalConforming(prop.expression, scope, context.definition);
+      if (value === NONCONFORMING) return;
+      // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
+      // accept warns once (HR007). It, and absent input, take the prop's default, or null.
+      const absent = value == null || value === ABSENT;
+      if (absent && prop.type === undefined) {
+        projectedScope.set(prop.name, (prop.default ?? null) as Value);
+        return;
+      }
+      if (prop.type !== undefined && (absent || !parseTypedValue(value, prop.type, "$", "value").ok)) {
+        if (!absent) {
+          warnAuthored(context.definition, `slot:${name}:${prop.name}`,
+            `${name === "" ? "The default slot" : `Slot \`${name}\``} prop \`${prop.name}\` does not satisfy its declared type \`${formatType(prop.type)}\`.`);
+        }
+        projectedScope.set(prop.name, (prop.default ?? null) as Value);
+        return;
+      }
+      projectedScope.set(prop.name, value);
+    });
+  }
+  const rendered = existing === undefined ? renderChildren(content, projectedScope, document, projectionContext) : (() => {
+    const adopted: Node[] = [];
+    let cursor = 0;
+    for (const child of content) {
+      const nodes = materialize(renderTemplateNode(child, projectedScope, document, projectionContext, existing[cursor]), document);
+      adopted.push(...nodes);
+      cursor += nodes.length;
+    }
+    return adopted;
+  })();
+  for (const child of rendered) markProjectedRoot(child);
+  // host.slots lists these roots while this outlet renders them, following a component's lowered root.
+  const roots = rendered.filter((child): child is Element => child.nodeType === 1);
+  roots.forEach((root, index) => { if (root.localName.includes("-")) whenLowered(root, (lowered) => { roots[index] = lowered; }); });
+  ownEffect(context, scope, () => {
+    let renderings = templateRenderings.get(carrier);
+    if (renderings === undefined) templateRenderings.set(carrier, renderings = new Set());
+    renderings.add(roots);
+    return () => { renderings.delete(roots); };
+  });
+  return rendered;
+}
+
+// ---- Columns as markup (components#columns-as-markup): `as` lists and `<slot of>` outlets ----
+
+/** An accepted child of a slot with `as`: the stable, read-only entry its list holds, and where it renders from. */
+interface ChildEntry {
+  /** What the template reads as an entry: the child's resolved props, read through its own scope. */
+  readonly value: object;
+  readonly tag: string;
+  readonly definition: ComponentDefinition;
+  /** The child's invocation, then the root it lowers to; or its server-rendered root. */
+  element: Element;
+  projected?: readonly Node[];
+  rootSelected?: boolean;
+  pending?: Set<() => void>;
+  claims?: ProjectionClaims;
+}
+const childEntries = new WeakMap<object, ChildEntry>();
+const entriesByElement = new WeakMap<Element, ChildEntry>();
+/** A child's invocation read when its entry was made, so its own preparation shares that prop scope. */
+const earlyInvocations = new WeakMap<Element, ReturnType<typeof readInvocation>>();
+/** The child whose slot a `<slot of>` outlet placed each node from, its logical parent for context. */
+const placedOwners = new WeakMap<Node, ChildEntry>();
+/** Set once any `<slot of>` outlet placed content, so lowering without one never looks. */
+let childPlacements = false;
+/** A server root's carried nodes, read before that child hydrates. */
+const serverCarried = new WeakMap<Element, readonly Node[]>();
+
+/** The tags an element stands for, outermost first: its rendered lineage, or its invocation's delegation chain. */
+function childLineage(element: Element, registry: DocumentRegistry): string[] {
+  const identity = componentIdentity(element);
+  if (identity !== "") return identity.split(/\s+/);
+  const lineage = [element.localName];
+  for (let root = registry.definitions.get(element.localName)?.definition.root;
+    root?.kind === "component" && !lineage.includes(root.tag); root = registry.definitions.get(root.tag)?.definition.root) lineage.push(root.tag);
+  return lineage;
+}
+
+/** The entry of an accepted child, made once: its prop scope is the one its own instance gets. */
+function childEntry(element: Element, tag: string, definition: ComponentDefinition, parent: RuntimeInstance): ChildEntry {
+  const known = entriesByElement.get(element);
+  if (known !== undefined) return known;
+  const owner = runtimeInstance(element);
+  const instance = owner?.definition.contract.tag === tag ? owner : owner?.delegates.find((delegate) => delegate.definition.contract.tag === tag);
+  let scope = instance?.scope;
+  if (scope === undefined) {
+    // A server root has no invocation left: its props come from its hydration record.
+    const read = untracked(() => readInvocation(element, definition, element.localName !== tag, parent));
+    earlyInvocations.set(element, read);
+    scope = read.scope;
+  }
+  const props: PropertyDescriptorMap = {};
+  for (const name of Object.keys(definition.contract.props)) props[name] = { get: () => scope.read(name), enumerable: true };
+  const entry: ChildEntry = { value: Object.freeze(Object.create(null, props) as object), tag, definition, element };
+  childEntries.set(entry.value, entry);
+  entriesByElement.set(element, entry);
+  if (element.localName === tag) whenLowered(element, (root) => { entry.element = root; entriesByElement.set(root, entry); });
+  return entry;
+}
+
+/** "`a`", "`a` and `b`", "`a`, `b` and `c`". */
+function listed(names: readonly string[]): string {
+  const quoted = names.map((name) => `\`${name}\``);
+  return quoted.length < 2 ? quoted.join("") : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+}
+
+function installAcceptedChildren(instance: RuntimeInstance, context: RuntimeRenderContext, slot: string, accepts: readonly string[], as: string | undefined, document: Document): void {
+  const registry = registryFor(document);
+  const owner = instance.definition;
+  const named = `\`${owner.contract.tag}\`'s ${slot === "" ? "default slot" : `\`${slot}\` slot`}`;
+  const leftOut = (key: string, message: string): void => warnAuthored(owner, `accepts:${slot}:${key}`, message);
+  let current: readonly object[] | undefined = as === undefined ? undefined : [];
+  const stops = new Map<Node, () => void>();
+  const observed = new Set<Node>();
+  const changed = (): void => untracked(update);
+  const update = (): void => {
+    observed.clear();
+    const next: object[] | undefined = as === undefined ? undefined : [];
+    const discard = (node: Node): void => {
+      rejectProjection(node);
+      for (const nodes of [context.projectedNodes, instance.projection!.nodes]) {
+        const index = nodes.indexOf(node);
+        if (index >= 0) (nodes as Node[]).splice(index, 1);
+      }
+    };
+    for (const [node, name] of withRegionContent(context.projectedNodes.map((node) => [node, projectedSlotName(node, context)] as const))) {
+      if (name !== slot) continue;
+      if (projectionRejected(node)) continue;
+      if (node.nodeType === 8 || node.nodeType === 7) {
+        if (regionStart(node)) {
+          observed.add(node);
+          if (!stops.has(node)) stops.set(node, observeRegion(node, instance, changed));
+        }
+        continue;
+      }
+      if (node.nodeType === 3) {
+        if (!HTML_WHITESPACE.test((node as Text).data)) {
+          leftOut("#text", `${named} accepts ${listed(accepts)}; this text is left out.`);
+          discard(node);
+        }
+        continue;
+      }
+      if (node.nodeType !== 1) continue;
+      const element = node as Element;
+      const lineage = childLineage(element, registry);
+      const tag = lineage[0]!;
+      const definition = registry.definitions.get(tag)?.definition;
+      const delegated = lineage.find((candidate) => accepts.includes(candidate));
+      if (delegated !== undefined && as === undefined) continue;
+      if (accepts.includes(tag) && definition !== undefined) {
+        next!.push(childEntry(element, tag, definition, instance).value);
+        continue;
+      }
+      leftOut(tag, delegated === undefined || delegated === tag
+        ? `${named} accepts ${listed(accepts)}; this \`<${tag}>\` is left out.`
+        : `\`<${tag}>\` is a preset of \`${delegated}\`, which ${named} accepts; a preset among accepted children is not supported yet, so it is left out.`);
+      if (delegated === undefined) discard(node);
+    }
+    for (const [region, stop] of stops) if (!observed.has(region)) { stop(); stops.delete(region); }
+    if (next === undefined || current === undefined) return;
+    const previous = current;
+    if (next.length === previous.length && next.every((value, index) => value === previous[index])) return;
+    for (const value of previous) {
+      if (next.includes(value)) continue;
+      // A child dropped before it lowered never prepares, so nothing else stops what its scope started.
+      const element = childEntries.get(value)!.element;
+      const early = earlyInvocations.get(element);
+      earlyInvocations.delete(element);
+      for (const effect of early?.effects ?? []) effect.stop();
+    }
+    current = Object.freeze(next);
+    instance.scope.set(as!, current as unknown as Value);
+  };
+  ownEffect(context, instance.scope, () => {
+    changed();
+    return () => { for (const stop of stops.values()) stop(); stops.clear(); };
+  });
+}
+
+const HTML_WHITESPACE = /^[\t\n\f\r ]*$/;
+
+/** The nodes a child assigned to its slot `name`: from its instance, its invocation, or its server carrier. */
+function childSlotNodes(entry: ChildEntry, name: string): Node[] {
+  const element = entry.element;
+  const owner = runtimeInstance(element);
+  const projection = (owner?.definition.contract.tag === entry.tag ? owner
+    : owner?.delegates.find((delegate) => delegate.definition.contract.tag === entry.tag))?.projection;
+  let nodes: readonly Node[];
+  if (projection !== undefined) {
+    nodes = currentProjection(projection.nodes);
+  } else if (element.localName === entry.tag) nodes = entry.projected ??= Array.from(element.childNodes);
+  else {
+    nodes = serverCarried.get(element) ?? serverRanges(element, false, entry.tag)?.carried ?? [];
+    serverCarried.set(element, nodes);
+  }
+  const borrowed = projection === undefined ? borrowedRanges.get(element) : undefined;
+  if (borrowed !== undefined) nodes = [...nodes, ...borrowed.filter(node => !nodes.includes(node))];
+  const assigned: Node[] = [];
+  let region: readonly [string, Node] | undefined;
+  for (const node of nodes) {
+    region ??= regionSlots.get(node);
+    const slot = projection?.slotNames.get(node) ?? region?.[0] ?? (node.nodeType === 1 ? (node as Element).getAttribute("slot") ?? "" : "");
+    if (slot === name) assigned.push(node);
+    if (node === region?.[1]) region = undefined;
+  }
+  return assigned;
+}
+
+const childSlotPropCache = new WeakMap<SlotNode, WeakMap<ComponentDefinition, NonNullable<SlotNode["props"]>>>();
+
+/**
+ * A `<slot of>` outlet's props, checked against the child's slot declaration as an outlet's own are:
+ * a bound prop takes its declared type and default, a static one converts by its declared type, and
+ * a declared default fills a prop the outlet leaves out. A literal null with a default gives a value.
+ */
+function childSlotProps(node: SlotNode, definition: ComponentDefinition, owner: ComponentDefinition): NonNullable<SlotNode["props"]> {
+  let cached = childSlotPropCache.get(node);
+  if (cached === undefined) childSlotPropCache.set(node, cached = new WeakMap());
+  const known = cached.get(definition);
+  if (known !== undefined) return known;
+  const name = node.name!;
+  const declared = definition.contract.slots?.[name]?.props ?? {};
+  const absent = compileExpression("null");
+  const outlet = `<slot of name="${name}">`;
+  const props: NonNullable<SlotNode["props"]>[number][] = (node.props ?? []).map((prop) => {
+    const contract = declared[prop.name];
+    if (contract === undefined) {
+      warnAuthored(owner, `of:${name}:${prop.name}`, `${outlet} gives prop \`${prop.name}\`, which \`${definition.contract.tag}\`'s slot \`${name}\` does not declare.`);
+      return prop;
+    }
+    if (prop.raw !== undefined) return { name: prop.name, expression: "null", expressionPlan: absent, default: invocationValue(contract, prop.raw, "html", true) ?? null };
+    return { ...prop, ...isUnknownType(contract.type) ? {} : { type: contract.type }, ...contract.default === undefined ? {} : { default: contract.default } };
+  });
+  for (const [prop, contract] of Object.entries(declared)) {
+    if (props.some((given) => given.name === prop)) continue;
+    if (contract.required) warnAuthored(owner, `of:${name}:${prop}`, `${outlet} must give prop \`${prop}\`, which \`${definition.contract.tag}\`'s slot \`${name}\` declares as required.`);
+    if (contract.default !== undefined) props.push({ name: prop, expression: "null", expressionPlan: absent, default: contract.default });
+  }
+  cached.set(definition, props);
+  return props;
+}
+
+function isUnknownType(type: ComponentDefinition["contract"]["props"][string]["type"]): boolean {
+  const node = normalizeType(type);
+  return node.kind === "terminal" && node.name === "unknown";
+}
+
+/**
+ * What a `<slot of>` outlet renders for one entry (or for none): the child's `<template slot>` afresh,
+ * its plain content where no outlet placed it yet, or the outlet's fallback.
+ */
+function placeChildSlot(
+  node: SlotNode,
+  entry: ChildEntry | null,
+  scope: ReactiveScope,
+  document: Document,
+  context: RuntimeRenderContext,
+  existing: readonly Node[] | undefined,
+  mark: Node,
+  retry: () => void,
+): { readonly nodes: Node[]; readonly fallback: boolean; readonly scoped: boolean; readonly pending?: true } {
+  const name = node.name!;
+  let scoped = (node.props?.length ?? 0) > 0;
+  const fallback = (): { nodes: Node[]; fallback: boolean; scoped: boolean } => {
+    if (existing === undefined) return { nodes: materialize(renderChildren(node.fallback ?? [], scope, document, context), document), fallback: true, scoped };
+    const nodes: Node[] = [];
+    for (const child of node.fallback ?? []) nodes.push(...renderTemplateNode(child, scope, document, context, existing[nodes.length]));
+    return { nodes, fallback: true, scoped };
+  };
+  if (entry === null) return fallback();
+  const declared = entry.definition.contract.slots?.[name];
+  const outlets = (entry.definition.slots ?? []).map((slot) => slot.name ?? "");
+  if (declared === undefined && !outlets.includes(name)) {
+    const known = [...new Set([...Object.keys(entry.definition.contract.slots ?? {}), ...outlets])].filter((slot) => slot !== "");
+    warnAuthored(context.definition, `of:${entry.tag}:${name}`, `\`${entry.tag}\` declares the slots ${listed(known)}; \`${name}\` is unknown.`);
+    return fallback();
+  }
+  scoped ||= Object.keys(declared?.props ?? {}).length > 0;
+  const content = childSlotNodes(entry, name);
+  const carrier = content.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);
+  let nodes: Node[];
+  if (carrier !== undefined) {
+    nodes = renderScopedTemplate(carrier, name, childSlotProps(node, entry.definition, context.definition), scope, document, context, existing);
+    for (const placed of nodes) placedOwners.set(placed, entry);
+    childPlacements = true;
+    return { nodes, fallback: false, scoped: true };
+  }
+  if (content.length === 0) return fallback();
+  if (scoped) {
+    warnAuthored(context.definition, `of:${entry.tag}:${name}:plain`, `\`${name}\` has props, so its content is a \`<template slot="${name}">\`.`);
+    return fallback();
+  }
+  if (entry.rootSelected === true && runtimeInstance(entry.element) === undefined && outlets.includes(name)) {
+    const waiting = entry.pending ??= new Set();
+    waiting.add(retry);
+    ownEffect(context, scope, () => () => { waiting.delete(retry); });
+    childPlacements = true;
+    return { nodes: [...existing ?? []], fallback: serverMark(mark)?.attributes.has("fallback") === true, scoped: false, pending: true };
+  }
+  const claims = entry.claims ??= new ProjectionClaims();
+  if (!claims.take(name, mark)) {
+    const cancel = claims.wait(name, mark, retry);
+    ownEffect(context, scope, () => cancel);
+    return fallback();
+  }
+  for (const placed of content) { borrowedContent.add(placed); placedOwners.set(placed, entry); }
+  childPlacements = true;
+  const lifetime = ownEffect(context, scope, () => () => { claims.release(name, mark); releaseContent(content); });
+  if (!documentState(document).staticRendering) claims.track(name, mark, mark, lifetime);
+  if (existing !== undefined) nodes = [...existing];
+  else if (context.committed) {
+    nodes = currentProjection(content);
+    for (const placed of nodes) markProjectedRoot(placed);
+  } else {
+    const anchor = document.createComment(`html-next:slot:${name}`);
+    context.slotInsertions.push({ anchor, nodes: content });
+    nodes = [anchor];
+  }
+  return { nodes, fallback: false, scoped: false };
+}
+
+/**
+ * `<slot of="$column" name="cell">`: the child's own `cell` slot, placed by this component. Its range
+ * carries the entry's index in its `as` list (rendered-form#borrowed-slot-ranges), and it renders again
+ * only when `of` names another entry.
+ */
+function renderChildSlot(
+  node: SlotNode,
+  scope: ReactiveScope,
+  document: Document,
+  context: RuntimeRenderContext,
+  candidate?: Node,
+): Node[] {
+  const of = node.of!;
+  const name = node.name!;
+  const hydrating = context.childRanges?.shift() ?? (candidate === undefined ? undefined : serverRangeAt(candidate, name));
+  const start = (hydrating?.markers[0] ?? renderedFormMark(document, "start", "")) as Comment;
+  const end = (hydrating?.markers.at(-1) ?? renderedFormMark(document, "end", "")) as Comment;
+  const fragment = hydrating === undefined ? document.createDocumentFragment() : undefined;
+  fragment?.append(start, end);
+  let adopting = hydrating?.content;
+  let shown: ChildEntry | null | undefined;
+  let owned: RenderOwned | undefined;
+  let flags = "";
+  let index = -1;
+  const mark = (): void => writeMark(start, "start", `slot="${name}" of="${index < 0 ? "" : index}"${flags}`);
+  const place = (entry: ChildEntry | null): void => {
+    owned?.stop();
+    owned = renderOwned(context.owned);
+    const existing = adopting;
+    adopting = undefined;
+    if (existing === undefined) {
+      // Keep caller regions intact while releasing this outlet's plain content.
+      if (flags === "" && start.nextSibling !== end) document.createDocumentFragment().append(...rangeNodes(start, end).slice(1, -1));
+      else clearRange(start, end);
+    }
+    // An adopted range of plain content holds the child's own nodes: they join its slot content.
+    else if (entry !== null && !hydrating!.fallback && !hydrating!.scoped) {
+      const element = entry.element;
+      const borrowed = borrowedRanges.get(element) ?? [];
+      borrowedRanges.set(element, [...borrowed, ...existing.filter(node => !borrowed.includes(node))]);
+    }
+    // Released plain content another outlet placed: this outlet places it now (`retry`).
+    const retry = (): void => { if (shown === entry) { place(entry); mark(); } };
+    const placed = untracked(() => placeChildSlot(node, entry, scope, document, ownedContext(context, owned!), existing, start, retry));
+    if (placed.pending === true) adopting = existing;
+    // Adopted nodes may come back through a fragment, so they go back before the end mark too.
+    for (const stale of existing ?? []) if (!placed.nodes.includes(stale)) stale.parentNode?.removeChild(stale);
+    end.before(...placed.nodes);
+    flags = `${placed.fallback ? ' fallback=""' : ""}${placed.scoped ? ' scoped=""' : ""}`;
+  };
+  let decision: ReactiveEffect;
+  const disconnect = (): void => {
+    if (!decision.paused) return;
+    owned?.stop();
+    shown = undefined;
+  };
+  decision = ownEffect(context, scope, () => {
+    const value = evalConforming(of.expressionPlan, scope, context.definition);
+    if (value === NONCONFORMING) return disconnect;
+    const owner = context.asScope ?? scope;
+    const list = of.lists === undefined ? owner.read(of.list) : of.lists.map(name => owner.read(name));
+    index = ownedEntryIndex(value, list);
+    const entry = index < 0 ? null : childEntries.get(value as object) ?? null;
+    if (entry !== shown) place(shown = entry);
+    mark();
+    return disconnect;
+  });
+  return fragment === undefined ? rangeNodes(start, end) : [fragment];
+}
+
+function slotFallback(nodes: Node[]): Node[] {
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index]!;
+    if (node.nodeType === 1 && (node as Element).localName.includes("-"))
+      whenLowered(node as Element, root => { nodes[index] = root; });
+  }
+  return nodes;
+}
+
+
+function renderClaimedSlot(
+  node: SlotNode, assigned: readonly Node[], scope: ReactiveScope, document: Document,
+  context: RuntimeRenderContext, candidate?: Node,
+): Node[] {
+  const name = node.name ?? "";
+  const claims = context.plainProjection!.claims ??= new ProjectionClaims();
+  const owner = {};
+  const hydration = context.hydrationRanges?.[0] ?? (candidate === undefined ? undefined : serverRangeAt(candidate, name));
+  const fragment = hydration === undefined ? document.createDocumentFragment() : undefined;
+  let start: ChildNode | undefined, end: ChildNode | undefined;
+  let first = true;
+  let lifetime: ReactiveEffect | undefined;
+  lifetime = ownEffect(context, scope, () => {
+    let claimed = false;
+    let cancel: (() => void) | undefined;
+    let owned: RenderOwned | undefined;
+    const place = (): void => {
+      cancel?.();
+      cancel = undefined;
+      owned?.stop();
+      owned = renderOwned(context.owned);
+      const available = claims.take(name, owner);
+      if (available) claimed = true;
+      const parent = start?.parentNode, after = end?.nextSibling ?? null;
+      if (!first) document.createDocumentFragment().append(...rangeNodes(start!, end!));
+      const local = Object.create(context, {
+        owned: { value: owned, enumerable: true },
+        claimedSlot: { value: node, enumerable: true },
+        projectedNodes: { value: available ? context.projectedNodes : context.projectedNodes.filter(node => !assigned.includes(node)), enumerable: true },
+        hydrationRanges: { value: first ? context.hydrationRanges : undefined, enumerable: true, writable: true },
+      }) as RuntimeRenderContext;
+      const content = renderSlot(node, scope, document, local, first ? candidate : undefined);
+      start = content[0] as ChildNode;
+      end = content.at(-1) as ChildNode;
+      if (available && lifetime !== undefined && !documentState(document).staticRendering) claims.track(name, owner, start, lifetime);
+      if (first && fragment !== undefined) fragment.append(...content);
+      else if (!first && parent != null) {
+        const nodes = document.createDocumentFragment();
+        nodes.append(...content);
+        parent.insertBefore(nodes, after);
+      }
+      if (!available) cancel = claims.wait(name, start, place);
+      first = false;
+    };
+    place();
+    return () => {
+      cancel?.();
+      owned?.stop();
+      if (claimed) claims.release(name, owner);
+    };
+  });
+  if (!documentState(document).staticRendering) claims.track(name, owner, start, lifetime);
+  return fragment === undefined ? rangeNodes(start!, end!) : [fragment];
+}
+
 function renderSlot(
   node: SlotNode,
   scope: ReactiveScope,
@@ -2760,73 +3488,28 @@ function renderSlot(
   context: RuntimeRenderContext,
   candidate?: Node,
 ): Node[] {
+  if (node.of !== undefined) return renderChildSlot(node, scope, document, context, candidate);
   const name = node.name ?? "";
-  const assigned = context.projectedNodes.filter((candidate) => projectedSlotName(candidate, context) === name);
+  const assigned = context.projectedNodes.filter((candidate) => !projectionRejected(candidate) && projectedSlotName(candidate, context) === name);
   const props = node.props ?? [];
   const carrier = assigned.find((candidate): candidate is HTMLTemplateElement => candidate instanceof HTMLTemplateElement);
   // A consumer's <template slot> renders lazily, like an $if body: only while this outlet renders,
   // in the consumer's scope, and afresh each time. Plain projection stays eager.
   const lazy = props.length > 0 || carrier !== undefined;
+  if (!lazy && assigned.length > 0 && context.claimedSlot !== node &&
+    (context.sharedProjection === true || repeatedSlotNames(context.definition).has(name))) {
+    return renderClaimedSlot(node, assigned, scope, document, context, candidate);
+  }
+  if (!lazy && context.definition.contract.slots?.[name]?.as !== undefined) {
+    for (const child of currentProjection(assigned)) {
+      const entry = child.nodeType === 1 ? entriesByElement.get(child as Element) : undefined;
+      if (entry === undefined) continue;
+      ownEffect(context, scope, () => { entry.rootSelected = true; return () => { entry.rootSelected = false; }; });
+    }
+  }
   const renderScoped = (existing?: readonly Node[]): Node[] => {
     if (carrier === undefined) fail("HR007", `Scoped slot \`${name}\` requires a consumer <template slot="${name}">.`);
-    const authored = projectedTemplates.get(carrier);
-    if (authored === undefined && projectedSlotParser === undefined) {
-      fail("HR007", "Scoped projection requires the live delivery's parser or a compiled consumer template.");
-    }
-    const content = authored?.children ?? projectedSlotParser!(carrier, context.definition, props.map((prop) => prop.name));
-    const projectedScope = new ReactiveScope([], scope.scheduler, authored?.scope);
-    // A `<slot>` in the template is the consumer's outlet, so it reads the consumer's projection and
-    // server ranges: read here, a same-name outlet would find this carrier again and render it without end.
-    const projectionContext = authored === undefined ? context : Object.create(context, {
-      definition: { value: authored.context.definition, enumerable: true },
-      refs: { value: authored.context.refs, enumerable: true },
-      projectedNodes: { value: authored.context.projectedNodes, enumerable: true },
-      projectedSlotNames: { value: authored.context.projectedSlotNames, enumerable: true },
-      hydrationRanges: { get: () => authored.context.hydrationRanges, enumerable: true },
-    }) as RuntimeRenderContext;
-    for (const prop of props) {
-      ownEffect(context, scope, () => {
-        const value = evalConforming(prop.expression, scope, context.definition);
-        if (value === NONCONFORMING) return;
-        // A typed prop's value is checked in full, as a prop's input is: one its declared type does not
-        // accept warns once (HR007). It, and absent input, take the prop's default, or null.
-        const absent = value == null || value === ABSENT;
-        if (absent && prop.type === undefined && prop.default !== undefined) {
-          projectedScope.set(prop.name, prop.default as Value);
-          return;
-        }
-        if (prop.type !== undefined && (absent || !parseTypedValue(value, prop.type, "$", "value").ok)) {
-          if (!absent) {
-            warnAuthored(context.definition, `slot:${name}:${prop.name}`,
-              `${name === "" ? "The default slot" : `Slot \`${name}\``} prop \`${prop.name}\` does not satisfy its declared type \`${formatType(prop.type)}\`.`);
-          }
-          projectedScope.set(prop.name, (prop.default ?? null) as Value);
-          return;
-        }
-        projectedScope.set(prop.name, value);
-      });
-    }
-    const rendered = existing === undefined ? renderChildren(content, projectedScope, document, projectionContext) : (() => {
-      const adopted: Node[] = [];
-      let cursor = 0;
-      for (const child of content) {
-        const nodes = materialize(renderTemplateNode(child, projectedScope, document, projectionContext, existing[cursor]), document);
-        adopted.push(...nodes);
-        cursor += nodes.length;
-      }
-      return adopted;
-    })();
-    for (const child of rendered) markProjectedRoot(child);
-    // host.slots lists these roots while this outlet renders them, following a component's lowered root.
-    const roots = rendered.filter((child): child is Element => child.nodeType === 1);
-    roots.forEach((root, index) => { if (root.localName.includes("-")) whenLowered(root, (lowered) => { roots[index] = lowered; }); });
-    ownEffect(context, scope, () => {
-      let renderings = templateRenderings.get(carrier);
-      if (renderings === undefined) templateRenderings.set(carrier, renderings = new Set());
-      renderings.add(roots);
-      return () => { renderings.delete(roots); };
-    });
-    return rendered;
+    return renderScopedTemplate(carrier, name, props, scope, document, context, existing);
   };
   // Rendered form (spec: live-browser-distributable.md, "Rendered form"): every rendered slot is
   // delimited, so server output can rebuild the same instance.
@@ -2850,7 +3533,7 @@ function renderSlot(
           (context.projectedNodes as Node[]).push(mark);
           context.projectedSlotNames.set(mark, name);
         }
-        switchFallback(hydrating.markers[0]!, regions, adopted);
+        ownEffect(context, scope, () => switchFallback(hydrating.markers[0]!, regions, slotFallback(adopted)));
       }
       return [hydrating.markers[0]!, ...adopted, ...empty, ...hydrating.markers.slice(1)];
     }
@@ -2868,7 +3551,8 @@ function renderSlot(
     for (const candidate of hydrating.content) markProjectedRoot(candidate);
     const regions = (node.fallback?.length ?? 0) > 0 ? slotRegions(hydrating.content) : undefined;
     if (regions !== undefined) {
-      switchFallback(hydrating.markers[0]!, regions, materialize(renderChildren(node.fallback!, scope, document, context), document));
+      const fallback = slotFallback(materialize(renderChildren(node.fallback!, scope, document, context), document));
+      ownEffect(context, scope, () => switchFallback(hydrating.markers[0]!, regions, fallback));
     }
     return hydrating.markers.length === 1
       ? [hydrating.markers[0]!]
@@ -2887,6 +3571,9 @@ function renderSlot(
   if (assigned.length === 0) {
     return ranged(renderChildren(node.fallback ?? [], scope, document, context), true);
   }
+  if (context.definition.contract.slots?.[name]?.accepts !== undefined && !currentProjection(assigned).some(node => node.nodeType === 1 || node.nodeType === 3) && slotRegions(assigned) === undefined) {
+    return ranged([...renderChildren(node.fallback ?? [], scope, document, context), ...currentProjection(assigned)], true);
+  }
   if (lazy) {
     return ranged(renderScoped(), false);
   }
@@ -2902,10 +3589,10 @@ function renderSlot(
   // Given only the consumer's `$if` or `$each` regions, the slot shows its fallback while they render nothing.
   const regions = (node.fallback?.length ?? 0) > 0 ? slotRegions(assigned) : undefined;
   if (regions === undefined) return ranged(content, false);
-  const fallback = materialize(renderChildren(node.fallback!, scope, document, context), document);
-  const empty = regions.every(([start, end]) => start.nextSibling === end);
+  const fallback = slotFallback(materialize(renderChildren(node.fallback!, scope, document, context), document));
+  const empty = slotRegionsEmpty(regions);
   const range = ranged(empty ? [...fallback, ...content] : content, empty);
-  switchFallback(range[0]!, regions, fallback);
+  ownEffect(context, scope, () => switchFallback(range[0]!, regions, fallback));
   return range;
 }
 
@@ -2918,6 +3605,7 @@ function instanceRecord(instance: RuntimeInstance): RenderedInstanceRecord {
     .filter(([, status]) => !status.ready || status.pending || status.error !== null || status.stale));
   return {
     explicit: [...instance.explicit],
+    ...(forwardsAttributes(instance.definition) ? { attributes: remainingAttributes(instance.attributeInputs, instance.definition).map(attribute => [attribute.name, attribute.value] as const) } : {}),
     inputs: Object.fromEntries(Object.entries(instance.propInputs).map(([name, signal]) => [name, signal.get()])),
     ...(Object.keys(availability).length === 0 ? {} : { availability }),
     ...(instance.inputRevisions === undefined ? {} : { revisions: Object.fromEntries(instance.inputRevisions) }),
@@ -2966,6 +3654,8 @@ export function serializeRenderedForm(container: Element): string {
         copy.textContent = original.value;
         copy.setAttribute(FORM_DEFAULTS_ATTRIBUTE, JSON.stringify({ value: original.defaultValue }));
       }
+      // HTML parsing discards one LF immediately after a textarea start tag.
+      if (copy.firstChild?.nodeType === 3 && copy.firstChild.textContent?.startsWith("\n")) copy.prepend("\n");
     } else if (original instanceof HTMLSelectElement && copy instanceof HTMLSelectElement) {
       for (let optionIndex = 0; optionIndex < original.options.length; optionIndex += 1) {
         const option = original.options[optionIndex]!;
@@ -2991,7 +3681,7 @@ export function serializeRenderedForm(container: Element): string {
       ? [instance, ...instance.delegates].map((entry) => [entry.definition.contract.tag, entry.projection?.nodes])
       : compiled === undefined ? [] : [compiled, ...compiled.D ?? []].map((entry) => [entry.S.g, entry.J?.map(([node]) => node)]);
     for (const [tag, recorded] of owners) {
-      const unrendered = recorded === undefined ? [] : currentProjection(recorded).filter((node) => !original.contains(node));
+      const unrendered = recorded === undefined ? [] : currentProjection(recorded).filter((node) => !original.contains(node) && !borrowedContent.has(node));
       for (const node of unrendered) if (!carriedBy.has(node)) carriedBy.set(node, carriers.length);
       carriers.push({ root: copy, tag, nodes: unrendered });
     }
@@ -3002,6 +3692,14 @@ export function serializeRenderedForm(container: Element): string {
     const others = [...carriedBy].flatMap(([node, owner]) => owner === index ? [] : [node]);
     // ponytail: scans the other carried nodes per copied subtree; a page holds few unrendered nodes.
     const copyOwn = (node: Node): Node => {
+      if (node instanceof HTMLTemplateElement) {
+        const source = projectedTemplates.get(node)?.node.slotContent;
+        if (source !== undefined) {
+          const copy = node.cloneNode(false) as HTMLTemplateElement;
+          copy.innerHTML = source;
+          return copy;
+        }
+      }
       if (!others.some((other) => node.contains(other))) return node.cloneNode(true);
       const copy = node.cloneNode(false);
       for (const child of node.childNodes) if (!others.includes(child)) copy.appendChild(copyOwn(child));
@@ -3178,6 +3876,7 @@ function prepareRuntimeInvocation(
   frameworkOwned = false,
   parent?: RuntimeInstance,
   frameworkProps?: Readonly<Record<string, unknown>>,
+  frameworkAttributes?: Readonly<Record<string, unknown>>,
 ): PreparedInvocation {
   const focusedControl = hydration && invocation.contains(invocation.ownerDocument.activeElement)
     ? invocation.ownerDocument.activeElement
@@ -3185,7 +3884,19 @@ function prepareRuntimeInvocation(
   const focusedSelection = focusedControl instanceof HTMLInputElement || focusedControl instanceof HTMLTextAreaElement
     ? [focusedControl.selectionStart, focusedControl.selectionEnd] as const
     : undefined;
-  const { scope, passThrough, effects, explicit, propInputs, inputRevisions } = readInvocation(invocation, definition, hydration, parent, frameworkProps);
+  // An accepted child its list already read keeps that prop scope, so its entry and instance agree.
+  const early = frameworkProps === undefined ? earlyInvocations.get(invocation) : undefined;
+  if (early !== undefined) earlyInvocations.delete(invocation);
+  const { scope, effects, explicit, propInputs, inputRevisions } = early ?? readInvocation(invocation, definition, hydration, parent, frameworkProps);
+  const attributeInputs = attributeInputsFor(invocation, definition.contract.tag);
+  if (frameworkAttributes !== undefined) {
+    for (const { name } of Array.from(attributeInputs.element.attributes)) attributeInputs.element.removeAttribute(name);
+    for (const [name, value] of Object.entries(frameworkAttributes)) {
+      const text = toAttribute(value as Value, name);
+      if (text !== null) setAttribute(attributeInputs.element, name, text);
+    }
+  }
+  if (forwardsAttributes(definition)) attributeInputs.revision ??= createSignal(0);
   const rootNode = elementMatchRoot(componentRoot(definition, scope));
   const rootWith = rootNode.flow?.kind === "with" ? rootNode.flow : undefined;
   const renderScope = rootWith === undefined ? scope : scope.fork();
@@ -3200,14 +3911,23 @@ function prepareRuntimeInvocation(
   }
   let hydratedNodes = projectedNodes;
   let hydrationRanges: HydrationRange[] | undefined;
+  let childRanges: HydrationRange[] | undefined;
+  const accepting = definition.contract.slots === undefined ? undefined
+    : Object.entries(definition.contract.slots).filter(([, slot]) => slot.accepts !== undefined);
+  const lists = accepting?.filter(([, slot]) => slot.as !== undefined);
   if (hydration && hydratedNodes === undefined) {
     const server = serverRanges(invocation, true, definition.contract.tag);
     if (server !== undefined) {
       // The rendered form names every slot range, and the serializer carried the
       // projected nodes no slot currently renders. Together they are the authored projection.
       hydrationRanges = server.ranges;
+      // A `<slot of>` range borrows a child's slot (rendered-form#borrowed-slot-ranges): its outlet adopts it.
+      if (lists?.length) {
+        childRanges = server.ranges.filter((range) => serverMark(range.markers[0]!)?.attributes.has("of"));
+        hydrationRanges = server.ranges.filter((range) => !childRanges!.includes(range));
+      }
       const nodes: Node[] = [];
-      for (const range of server.ranges) {
+      for (const range of hydrationRanges) {
         if (range.fallback || range.scoped) continue;
         for (const node of range.content) {
           projectedSlotNames.set(node, range.slot);
@@ -3224,14 +3944,17 @@ function prepareRuntimeInvocation(
       hydratedNodes = [];
     }
   }
-  const children: Node[] = hydration ? [...hydratedNodes!] : Array.from(invocation.childNodes);
-  const projected = hydration ? children : Array.from(invocation.childNodes);
+  const foundEntry = entriesByElement.get(invocation);
+  const acceptedEntry = foundEntry?.tag === definition.contract.tag ? foundEntry : undefined;
+  const original = acceptedEntry?.projected;
+  const children: Node[] = hydration ? [...hydratedNodes!] : [...original ?? invocation.childNodes];
+  for (const node of borrowedRanges.get(invocation) ?? []) if (!children.includes(node)) children.push(node);
+  const projected = hydration ? children : [...children];
   // A consumer region for an element with `slot` projects whole into that slot, its marks included,
   // so what it renders later lands there too.
   let region: readonly [string, Node] | undefined;
   for (const node of children) {
     if (node.nodeType === 8 && /^html-next:(?:each-)?start$/.test((node as Comment).data)) projectedRegions.add(node);
-    if (hydration) continue;
     region ??= regionSlots.get(node);
     if (region === undefined) continue;
     projectedSlotNames.set(node, region[0]);
@@ -3242,7 +3965,7 @@ function prepareRuntimeInvocation(
       const index = nodes.indexOf(current);
       if (index >= 0) nodes[index] = next;
     }
-    const slot = projectedSlotNames.get(current);
+    const slot = projectedSlotNames.get(current) ?? (current instanceof Element ? current.getAttribute("slot") ?? "" : undefined);
     if (slot !== undefined) projectedSlotNames.set(next, slot);
   };
   // A projected component invocation lowers to its own root, perhaps only once a slot renders it.
@@ -3258,6 +3981,7 @@ function prepareRuntimeInvocation(
   }
   const instance: RuntimeInstance = {
     definition,
+    attributeInputs,
     ...(parent === undefined ? {} : { parent }),
     scope,
     propInputs,
@@ -3282,6 +4006,10 @@ function prepareRuntimeInvocation(
   }
   const context: RuntimeRenderContext = {
     definition,
+    ...((lists?.length ?? 0) === 0 ? {} : { asScope: scope }),
+    ...(acceptedEntry === undefined ? {} : { sharedProjection: true as const }),
+    ...(acceptedEntry !== undefined ? { plainProjection: acceptedEntry } : repeatedSlotNames(definition).size > 0 ? { plainProjection: {} } : {}),
+    attributeInputs,
     owned: instance.owned,
     refs: instance.refs,
     projectedNodes: children,
@@ -3292,7 +4020,9 @@ function prepareRuntimeInvocation(
     frameworkOwned,
     committed: hydration,
     hydrationRanges,
+    childRanges,
   };
+  for (const [slot, { accepts, as }] of accepting ?? []) installAcceptedChildren(instance, context, slot, accepts!, as, invocation.ownerDocument);
   const lifecycle = definition.lifecycle;
   if (lifecycle !== undefined) {
     // One connection-owned effect, as a controller's `host.on`: it runs `on:connect` each time the
@@ -3319,11 +4049,12 @@ function prepareRuntimeInvocation(
     renderRootNode,
     renderScope,
     invocation.ownerDocument,
-    passThrough,
+    [],
     context,
     hydration ? invocation : undefined,
   );
   context.hydrationRanges = undefined;
+  context.childRanges = undefined;
   const nativeRoot = rendered[0] as Element;
   if (hydration && nativeRoot !== invocation) {
     fail("HR005", `Server markup for <${definition.contract.tag}> has an incompatible root.`);
@@ -3458,17 +4189,30 @@ function scriptOwners(document: Document, instance: RuntimeInstance, scope: Reac
 
 /** Capture the closest component owner while an invocation still sits in its authored tree. */
 function invocationParent(element: Element, pending: WeakMap<Element, RuntimeInstance>): RuntimeInstance | undefined {
-  for (let ancestor = element.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
-    const prepared = pending.get(ancestor);
-    if (prepared !== undefined) return prepared;
-    const existing = runtimeInstance(ancestor);
-    if (existing !== undefined) return existing;
+  for (let ancestor: Element | null = element; ancestor !== null; ancestor = ancestor.parentElement) {
+    if (ancestor !== element) {
+      const prepared = pending.get(ancestor);
+      if (prepared !== undefined) return prepared;
+      const existing = runtimeInstance(ancestor);
+      if (existing !== undefined) return existing;
+    }
+    // Content a `<slot of>` outlet placed has the slot's owner as its logical parent (components#component-ancestry-for-shared-state).
+    const placed = childPlacements ? placedOwners.get(ancestor) : undefined;
+    if (placed !== undefined) return pending.get(placed.element) ?? runtimeInstance(placed.element);
   }
   return undefined;
 }
 
 /** An attribute a root receives from outside its template: the invocation, a factory, or page code. */
 type RootAttribute = Pick<Attr, "name" | "value">;
+
+/** Preserve direct page writes when replacing an existing root. */
+function carryRootAttributes(element: Element, attributes: readonly RootAttribute[]): void {
+  for (const { name, value } of attributes) {
+    const own = name === "class" || name === "style" ? element.getAttribute(name) : null;
+    setLiteralAttribute(element, name, own === null || own === "" ? value : `${own}${name === "class" ? " " : "; "}${value}`);
+  }
+}
 
 /**
  * Ties an instance to its root element. Lowering and every later replacement of the root come here,
@@ -3507,61 +4251,76 @@ function attachRoot(instance: RuntimeInstance, element: Element): void {
  * native root takes the old one's place. It keeps every attribute the old arm's template did not
  * write, so the invocation's, a factory's, and page code's attributes carry over.
  */
+/**
+ * The attributes a root received from outside its template: every attribute of `previous` that the
+ * instance's current root template did not write, so the invocation's, a factory's, and page code's.
+ */
+function carriedAttributes(instance: RuntimeInstance, previous: Element): RootAttribute[] {
+  const { definition } = instance;
+  const tag = definition.contract.tag;
+  // Reflected props, the state attribute, and bound attributes are rewritten by their own effects.
+  // A literal is the old arm's only when it still holds the arm's value; a different value is the
+  // consumer's override, which carries over as it would have applied to any arm.
+  const literals = new Map<string, string>();
+  const written = new Set([
+    stateAttribute(tag),
+    ...Object.keys(definition.contract.props).map((name) => propAttribute(tag, name)),
+  ]);
+  // Class tokens and style properties are shared with the consumer, so only the old arm's own go.
+  // The browser's CSS parser names the properties its style writes, shorthands as their longhands.
+  const ownClasses = new Set<string>();
+  const ownStyle = previous.ownerDocument.createElement("div").style;
+  for (const attribute of instance.rootNode.attributes) {
+    if (attribute.kind === "literal" && attribute.name === "class") {
+      for (const token of attribute.value.split(/\s+/)) ownClasses.add(token);
+    } else if (attribute.kind === "attribute" && attribute.target === "class") {
+      ownClasses.add(attribute.name);
+    } else if (attribute.kind === "literal" && attribute.name === "style") {
+      ownStyle.cssText += `;${attribute.value}`;
+    } else if (attribute.kind === "attribute" && attribute.target === "style") {
+      ownStyle.setProperty(attribute.name, "initial");
+    } else if (attribute.kind === "literal") {
+      literals.set(attribute.name, attribute.value);
+    } else if (attribute.kind === "attribute") {
+      written.add(attribute.name);
+    } else if (attribute.kind === "property") {
+      // A reflecting property writes its attribute: `.disabled` writes `disabled`.
+      // ponytail: lowercase plus htmlFor; a property whose attribute differs otherwise carries over.
+      written.add(attribute.name === "htmlFor" ? "for" : asciiLowerCase(attribute.name));
+    }
+  }
+  for (const [name, value] of orderedRootOutputs.get(previous) ?? []) {
+    if (name === "class") {
+      for (const token of value?.split(/\s+/) ?? []) ownClasses.add(token);
+    } else if (name === "style") ownStyle.cssText += `;${value ?? ""}`;
+    else if (value !== null) literals.set(name, value);
+  }
+  const ownStyles = new Set(Array.from(ownStyle));
+  const carried: RootAttribute[] = [];
+  for (const attribute of Array.from(previous.attributes)) {
+    if (attribute.name === "class") {
+      const value = attribute.value.split(/\s+/).filter((token) => token !== "" && !ownClasses.has(token)).join(" ");
+      if (value !== "") carried.push({ name: "class", value });
+    } else if (attribute.name === "style") {
+      const style = (previous as HTMLElement).style;
+      const value = Array.from(style).filter((property) => !ownStyles.has(property)).map((property) =>
+        `${property}: ${style.getPropertyValue(property)}${style.getPropertyPriority(property) === "" ? "" : " !important"}`
+      ).join("; ");
+      if (value !== "") carried.push({ name: "style", value });
+    } else if (!written.has(attribute.name) && literals.get(attribute.name) !== attribute.value) {
+      carried.push({ name: attribute.name, value: attribute.value });
+    }
+  }
+  return carried;
+}
+
 function installRootSwitch(instance: RuntimeInstance, context: RuntimeRenderContext): void {
   const { definition, scope } = instance;
-  const tag = definition.contract.tag;
   instance.effects.push(createEffect(scope.scheduler, () => {
     const next = componentRoot(definition, scope);
     const previous = instance.element;
     if (next === instance.rootNode || !context.committed || previous === undefined) return;
-    // Reflected props, the state attribute, and bound attributes are rewritten by their own effects.
-    // A literal is the old arm's only when it still holds the arm's value; a different value is the
-    // consumer's override, which carries over as it would have applied to any arm.
-    const literals = new Map<string, string>();
-    const written = new Set([
-      stateAttribute(tag),
-      ...Object.keys(definition.contract.props).map((name) => propAttribute(tag, name)),
-    ]);
-    // Class tokens and style properties are shared with the consumer, so only the old arm's own go.
-    // The browser's CSS parser names the properties its style writes, shorthands as their longhands.
-    const ownClasses = new Set<string>();
-    const ownStyle = (previous.ownerDocument.createElement("div")).style;
-    for (const attribute of instance.rootNode.attributes) {
-      if (attribute.kind === "literal" && attribute.name === "class") {
-        for (const token of attribute.value.split(/\s+/)) ownClasses.add(token);
-      } else if (attribute.kind === "attribute" && attribute.target === "class") {
-        ownClasses.add(attribute.name);
-      } else if (attribute.kind === "literal" && attribute.name === "style") {
-        ownStyle.cssText += `;${attribute.value}`;
-      } else if (attribute.kind === "attribute" && attribute.target === "style") {
-        ownStyle.setProperty(attribute.name, "initial");
-      } else if (attribute.kind === "literal") {
-        literals.set(attribute.name, attribute.value);
-      } else if (attribute.kind === "attribute") {
-        written.add(attribute.name);
-      } else if (attribute.kind === "property") {
-        // A reflecting property writes its attribute: `.disabled` writes `disabled`.
-        // ponytail: lowercase plus htmlFor; a property whose attribute differs otherwise carries over.
-        written.add(attribute.name === "htmlFor" ? "for" : attribute.name.toLowerCase());
-      }
-    }
-    const ownStyles = new Set(Array.from(ownStyle));
-    const carried: RootAttribute[] = [];
-    for (const attribute of Array.from(previous.attributes)) {
-      if (attribute.name === "class") {
-        const value = attribute.value.split(/\s+/).filter((token) => token !== "" && !ownClasses.has(token)).join(" ");
-        if (value !== "") carried.push({ name: "class", value });
-      } else if (attribute.name === "style") {
-        const style = (previous as HTMLElement).style;
-        const value = Array.from(style).filter((property) => !ownStyles.has(property)).map((property) =>
-          `${property}: ${style.getPropertyValue(property)}${style.getPropertyPriority(property) === "" ? "" : " !important"}`
-        ).join("; ");
-        if (value !== "") carried.push({ name: "style", value });
-      } else if (!written.has(attribute.name) && literals.get(attribute.name) !== attribute.value) {
-        carried.push({ name: attribute.name, value: attribute.value });
-      }
-    }
-
+    const carried = carriedAttributes(instance, previous);
     instance.owned.stop();
     instance.owned = context.owned = renderOwned();
     for (const ref of Object.keys(instance.refs)) delete instance.refs[ref];
@@ -3628,6 +4387,8 @@ function commitRuntimeInvocations(
     if (invocation.replace) {
       supersededInvocations.add(invocation.invocation);
       invocation.invocation.replaceWith(invocation.nativeRoot);
+      // A projected invocation's root is the projected node now, so slotted styles reach it.
+      if (invocation.invocation.hasAttribute(PROJECTED_ATTRIBUTE)) markProjectedRoot(invocation.nativeRoot);
       runtimeInstances.delete(invocation.invocation);
       // Whatever a parent deferred for this invocation now has the element it was waiting for.
       for (const rebind of rebindOnLower.get(invocation.invocation) ?? []) {
@@ -3660,6 +4421,14 @@ function commitRuntimeInvocations(
       if (root !== undefined) followRoot(runtimeInstances.get(root) ?? invocation.instance, root);
     }
     connectRuntimeInstance(invocation.instance);
+    if (childPlacements) {
+      const entry = entriesByElement.get(invocation.invocation);
+      const waiting = entry?.pending;
+      if (waiting !== undefined) {
+        delete entry!.pending;
+        for (const place of waiting) place();
+      }
+    }
   }
 }
 
@@ -3675,12 +4444,19 @@ function commitRuntimeInvocations(
  * Otherwise nested components stay inert until something else observes the document, which a build
  * -time delivery has no reason to do.
  */
+/** Application output writes use the existing root follower, independently of template inputs. */
+function followApplicationAttributes(instance: RuntimeInstance, attributes: Readonly<Record<string, string>> | undefined): void {
+  if (attributes === undefined) return;
+  instance.followers.push(root => { for (const [name, value] of Object.entries(attributes)) setAttribute(root, name, value); });
+}
+
 function lowerRenderedComponents(
   root: Document,
   registry: DocumentRegistry,
   committed: readonly PreparedInvocation[],
   shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
   props?: DocumentRenderingOptions["props"],
+  rootAttributes?: DocumentRenderingOptions["rootAttributes"],
 ): Element[] {
   const lowered: Element[] = [];
   let batch = committed;
@@ -3714,6 +4490,7 @@ function lowerRenderedComponents(
       const values = props?.get(element);
       if (values !== undefined) checkProps(Object.keys(definition.contract.props), values, definition.contract.tag);
       const invocation = prepareRuntimeInvocation(element, definition, false, undefined, undefined, false, invocationParent(element, pendingOwners), values);
+      followApplicationAttributes(invocation.instance, rootAttributes?.get(element));
       prepared.push(invocation);
       pendingOwners.set(element, invocation.instance);
       recordUnrendered(invocation, unrendered);
@@ -3751,6 +4528,10 @@ function alreadyLowered(element: Element, tag: string): boolean {
 function adoptComponentRoot(instance: RuntimeInstance, root: Element): void {
   instance.element = root;
   const owner = runtimeInstances.get(root);
+  const identity = root.hasAttribute("component") || !root.hasAttribute("data-component") ? COMPONENT_ATTRIBUTE : "data-component";
+  const tokens = componentIdentity(root).split(/\s+/).filter(Boolean);
+  const tag = instance.definition.contract.tag;
+  if (!tokens.includes(tag)) root.setAttribute(identity, (owner === undefined ? [tag, ...tokens] : [...tokens, tag]).join(" "));
   if (owner === undefined) {
     attachRoot(instance, root);
     installPropReflection(instance);
@@ -3792,6 +4573,7 @@ function lowerScopes(
   scopes: readonly QueryRoot[],
   shouldLower?: (element: Element, definition: ComponentDefinition, hydration: boolean) => boolean,
   props?: DocumentRenderingOptions["props"],
+  rootAttributes?: DocumentRenderingOptions["rootAttributes"],
 ): LoweredScopes {
   const registry = registryFor(root);
   const discovered = new Set<Element>();
@@ -3805,18 +4587,24 @@ function lowerScopes(
     }
   }
   const newDefinitions = new Map<string, LiveDefinition>();
+  // A definition for a registered tag replaces it once this batch has lowered; the same one changes nothing.
+  const replacing: LiveDefinition[] = [];
+  const fresh: LiveDefinition[] = [];
   for (const live of definitions) {
     const tag = live.definition.contract.tag;
-    if (registry.definitions.has(tag) || newDefinitions.has(tag)) {
+    if (newDefinitions.has(tag) || replacing.some((other) => other.definition.contract.tag === tag)) {
       fail("HR001", `More than one definition declares <${tag}>.`);
     }
-    newDefinitions.set(tag, live);
+    const registered = registry.definitions.get(tag)?.definition;
+    if (registered === undefined) { newDefinitions.set(tag, live); fresh.push(live); }
+    else if (sameDefinition(registered, live.definition)) live.wrapper!.remove();
+    else replacing.push(live);
   }
 
   // Parent bindings can run while their child invocations are being prepared. Make every newly
   // parsed contract available for the bound-value type check before preparing any parent.
   const existingDefinitions = new Map(registry.definitions);
-  for (const live of definitions) registerDefinition(root, registry, live.definition.contract.tag, live);
+  for (const live of fresh) registerDefinition(root, registry, live.definition.contract.tag, live);
 
   const roots = new Set<Element>();
   const lowered: Element[] = [];
@@ -3839,6 +4627,7 @@ function lowerScopes(
     const values = props?.get(element);
     if (values !== undefined) checkProps(Object.keys(definition.contract.props), values, definition.contract.tag);
     const invocation = prepareRuntimeInvocation(element, definition, hydration, undefined, undefined, false, invocationParent(element, pendingOwners), values);
+    followApplicationAttributes(invocation.instance, rootAttributes?.get(element));
     prepared.push(invocation);
     pendingOwners.set(element, invocation.instance);
     if (!hydration) recordUnrendered(invocation, unrendered);
@@ -3869,17 +4658,17 @@ function lowerScopes(
   collect(existingDefinitions, discovered);
   // A newly discovered definition also applies to matching invocations that predate it.
   if (newDefinitions.size > 0) {
-    const pendingSelector = [
+    const pendingSelector = boundedDiscoverySelector([
       COMPONENT_ROOT_SELECTOR,
       ...Array.from(newDefinitions.keys()),
-    ].join(",");
+    ].join(","));
     const existing = new Set<Element>();
     collectWithin(root, pendingSelector, existing);
     collect(newDefinitions, existing);
   }
 
-  const styles = styleGraph(registry, definitions.map((live) => live.definition));
-  for (const live of definitions) {
+  const styles = styleGraph(registry, fresh.map((live) => live.definition));
+  for (const live of fresh) {
     const style = installComponentStyles(live.definition, live.wrapper!.ownerDocument,
       live.style?.localName === "style" ? live.style as HTMLStyleElement : undefined, undefined, styles);
     registry.definitions.set(live.definition.contract.tag, { ...live, style });
@@ -3892,10 +4681,11 @@ function lowerScopes(
     lowered.push(element);
     roots.add(element);
   }
-  for (const element of lowerRenderedComponents(root, registry, prepared, shouldLower, props)) {
+  for (const element of lowerRenderedComponents(root, registry, prepared, shouldLower, props, rootAttributes)) {
     lowered.push(element);
     roots.add(element);
   }
+  for (const live of replacing) replaceDefinition(root, registry, live);
 
   return { lowered, roots: Array.from(roots) };
 }
@@ -3909,13 +4699,15 @@ export interface DocumentRenderingOptions {
   readonly connect?: boolean;
   /** Typed caller inputs for invocations in this pass, before one-time state initialization. */
   readonly props?: ReadonlyMap<Element, Readonly<Record<string, unknown>>>;
+  /** Attributes the application explicitly writes on a lowered root, followed through root replacement. */
+  readonly rootAttributes?: ReadonlyMap<Element, Readonly<Record<string, string>>>;
 }
 
 export function lowerDocument(root: Document = document, options: DocumentRenderingOptions = {}): number {
   const state = documentState(root);
   const wasStatic = state.staticRendering;
   state.staticRendering = options.connect === false;
-  const result = lowerScopes(root, [root], undefined, options.props);
+  const result = lowerScopes(root, [root], undefined, options.props, options.rootAttributes);
   if (wasStatic && !state.staticRendering) {
     for (const element of result.roots) {
       const instance = runtimeInstance(element);
@@ -3927,6 +4719,8 @@ export function lowerDocument(root: Document = document, options: DocumentRender
 
 export interface ComponentAttachmentOptions {
   readonly props?: Readonly<Record<string, unknown>>;
+  /** Logical invocation attributes for authored forwarding, separately from the framework's root output. */
+  readonly attributes?: Readonly<Record<string, unknown>>;
   readonly controller?: ControllerModule;
   readonly module?: ComponentModule;
   /**
@@ -4083,12 +4877,14 @@ export function registerComponentDefinitions(
 ): void {
   const registry = registryFor(root);
   const styles = styleGraph(registry, definitions);
+  const given = new Set<string>();
   for (const definition of definitions) {
-    const existing = registry.definitions.get(definition.contract.tag);
+    const tag = definition.contract.tag;
+    if (given.has(tag)) fail("HR001", `More than one definition declares <${tag}>.`);
+    given.add(tag);
+    const existing = registry.definitions.get(tag);
     if (existing !== undefined) {
-      if (JSON.stringify(existing.definition) !== JSON.stringify(definition)) {
-        fail("HR001", `More than one definition declares <${definition.contract.tag}>.`);
-      }
+      if (!sameDefinition(existing.definition, definition)) replaceDefinition(root, registry, { definition, style: undefined }, styles);
       continue;
     }
     registerDefinition(root, registry, definition.contract.tag, {
@@ -4163,7 +4959,7 @@ function attachRuntimeComponent(
       }
     }
     const attaching = [
-      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, frameworkOwned, invocationParent(element, new WeakMap()), options.props),
+      prepareRuntimeInvocation(element, definition, true, projected, projectedSlotNames, frameworkOwned, invocationParent(element, new WeakMap()), options.props, options.attributes),
     ];
     commitRuntimeInvocations(registry, attaching);
     // Generated output attaches its own root, so nothing else will lower the components this
@@ -4507,6 +5303,8 @@ export function getComponentHost(element: Element, tag?: string): ComponentHost 
   const stateNames = new Set(declarations.flatMap((declaration) =>
     declaration.kind === "state" || declaration.kind === "computed" ? [declaration.name]
       : declaration.kind === "context" ? [declaration.as ?? declaration.name] : []));
+  // An `as` list reads like computed state: controllers see it, read-only.
+  for (const slot of Object.values(instance.definition.contract.slots ?? {})) if (slot.as !== undefined) stateNames.add(slot.as);
   const dataNames = new Set(declarations.filter((declaration) => declaration.kind === "data").map((declaration) => declaration.name));
   const nested = new WeakMap<object, Map<string, object>>();
   const write = (path: string, value: unknown, readonly: boolean, apply: () => void): boolean => {

@@ -4,6 +4,8 @@ The `@nextwebwg/html-next/server` entry renders validated component definitions 
 Node.js. It uses the same general renderer as live browser delivery, rather than a second component
 interpreter. This entry is separate from browser imports.
 
+The [full-stack Node example](../examples/full-stack-node) renders a count and computed double from request data, then hydrates the component and updates both on click. It uses the same component and browser-module files as the [C# example](../../html-next-dotnet/examples/counter). Follow the [full-stack guide](https://nextwebwg.org/html-next/full-stack) to run both applications.
+
 Text paths and formatting expressions follow the public [template](https://nextwebwg.org/html-next/templating/)
 and [expression](https://nextwebwg.org/html-next/expressions/#formatting-intl-expressions) proposals.
 Pass an explicit locale, and a time zone for instants, when server text must match the browser.
@@ -30,7 +32,7 @@ const counter = parseComponent(`<template component="x-counter"><defs>
   <prop name="label" type="string" default="Counter">Label.</prop>
   <state name="count" type="number" value="0"></state>
   <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-</defs><button type="button" on:click="increment">{$label}: <span $value="$count"></span></button></template>`);
+</defs><button $attributes type="button" on:click="increment">{$label}: <span $value="$count"></span></button></template>`);
 
 const { html, css, styleOwnership } = await renderComponents('<x-counter id="counter"></x-counter>', {
   definitions: [counter],
@@ -55,6 +57,17 @@ retaining caller ownership; `undefined` releases the prop, including an invocati
 Omitted props keep their invocation values or implicit defaults. Inputs must name declared props;
 a selector that matches no invocation is an error. Values cross the worker boundary through
 Node's structured clone.
+
+Unconsumed invocation attributes apply first on the rendered root. A defining
+template with `noforward` forwards them only at explicit `$attributes` positions,
+following the proposal's [attribute forwarding rules](https://nextwebwg.org/declarative-components/components#attribute-forwarding).
+The example forwards `id` through its authored `$attributes` directive.
+
+`rootAttributes` writes application-owned output attributes directly on lowered roots, keyed by
+selectors for the authored invocations. For example,
+`rootAttributes: { "x-counter": { "data-page-layer": "0" } }` identifies the rendered root for
+application code and `state` selectors. These writes follow replacement roots and remain separate
+from invocation inputs and their authored forwarding destinations.
 
 `state` addresses lowered component roots, so selectors should use stable authored IDs. Each value
 must name declared state. Node output matches the browser's declarative baseline before connection:
@@ -152,7 +165,7 @@ DOM. Browser rendering already owns component interpretation, DOM creation, form
 slot adoption and reactive scheduling. Reimplementing that interpretation against a string builder
 would create a second semantic engine. The server entry therefore supplies a parse5-backed jsdom
 document in a dedicated worker. Browser constructors exist only in that worker; concurrent requests
-and the caller cannot share them. Worker startup is currently paid per render. CSS uses the existing
+and the caller cannot share them. A pool reuses workers across renders. CSS uses the existing
 PostCSS build compiler because server DOM CSSOM support does not match modern browser CSS.
 
 Native DOM connection (`isConnected`) also holds in a server DOM; it does not mean an instance has

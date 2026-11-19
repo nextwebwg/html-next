@@ -1,0 +1,220 @@
+{
+  "checkpoint": "Plain source native hydration and reconnect ownership, based on bc1e3913",
+  "baseCommit": "bc1e3913d7210873f60b326f29ae750df7ad4a7c",
+  "branch": "matthew-dean/c-renderer-handoff-goal",
+  "releaseVersion": "1.0.0-alpha.92",
+  "goalStatus": "active",
+  "shipReady": false,
+  "proposal": {
+    "repository": "nextwebwg/specs",
+    "commit": "ee83bc361313d3f2a30868bd890a606ac298091d",
+    "references": [
+      "html-next/components.md#content-that-renders-on-demand",
+      "html-next/components.md#slot-of"
+    ]
+  },
+  "changes": [
+    "Initial React/Preact rendering hydrates the inline source where SSR placed it. Native mounted source ownership then transfers to an existing stable portal without a second application root or replacing the source DOM. Native class boundaries add no host wrapper.",
+    "Native source ranges retain live nodes, deferred hydration boundary markers, source state, native context and useId through destination changes. Delegated events follow the source parent while parked. Native Activity pause retains the mounted source; actual destruction disposes it.",
+    "Empty ordinary sources retain destination identity and fallbacks so returning text belongs to the original first placement. Scoped and authored lazy-template behavior stays fresh.",
+    "Compiled and handwritten accepting content share one filter. Rejected native elements and visible text are omitted after existing diagnostics; compiled entry keys and diagnostic ownership are preserved.",
+    "ProjectionClaims associates native position and effect lifetime. Paused owners preserve identity through whole-mount reconnect; permanent stop releases through the existing registration, including stop while paused. Static Node rendering skips pause tracking.",
+    "Negative browser bundle tests keep retained-source owners out of ordinary named/default button output. Existing table fixtures explicitly forward unclaimed attributes at their authored th destination; original output assertions remain intact."
+  ],
+  "proofBeforeFix": [
+    {
+      "case": "Actual framework hydration",
+      "observation": "Both existing public tests fail at baseline. React recovers the whole tree after template-vs-i mismatch; Preact silently replaces the original preedited input."
+    },
+    {
+      "case": "Static slot order",
+      "observation": "Intermediate positioning change produced SecondFallbackPlain instead of PlainSecondFallback. Earliest owned source/fallback/anchor lookup restores the unchanged manual structures."
+    },
+    {
+      "case": "Parked native event",
+      "observation": "Native React counter remained Context!!:2 after a programmatic click while every outlet was absent; expected Context!!:3. Preact direct-listener control passed. Retarget delegated listeners to the parking fragment."
+    },
+    {
+      "case": "Empty source returns",
+      "observation": "Both targets rendered BorrowedFallback/Plain after empty text source returned; expected Plain/OwnFallback. Keep the borrowed destination while ordinary content is empty."
+    },
+    {
+      "case": "Native Activity pause/reveal",
+      "observation": "Original input disappeared after reveal. Native control establishes actual StrictMode effect pause/restart counts; retain the mounted range instead of treating layout pause as permanent destruction."
+    },
+    {
+      "case": "Native Suspense source",
+      "observation": "Hydrated original input was lost on first transfer because deferred server DOM had no child host fibers at initial capture. Include the native DehydratedFragment comment range."
+    },
+    {
+      "case": "Accepting content",
+      "observation": "Existing warning test showed native span and stray text in converted tr while live omitted them. Classifier warnings alone and classifier-only return changes did not affect the compiled raw-content path. Route both compiled and derived content through the same filter without reassigning compiled entries."
+    },
+    {
+      "case": "Live whole-mount reconnect",
+      "observation": "Shared own-first cases switched to borrowed placement after reconnect. Strengthened immediate post-reconnect assertion reproduces it before the later unrelated alias update. Preserve paused claim identity and release permanently stopped lifetimes."
+    }
+  ],
+  "nativeDependencies": {
+    "react": {
+      "minimum": "19.3.0",
+      "installed": "19.3.0",
+      "fields": [
+        "class _reactInternals",
+        "fiber child/return/sibling/alternate/stateNode/current",
+        "portal tag4",
+        "dehydrated fragment tag18 and native Suspense/Activity comment markers"
+      ]
+    },
+    "preact": {
+      "minimum": "11.1.0",
+      "installed": "11.1.0",
+      "fields": [
+        "class __v",
+        "vnode __k/__/__e/__c",
+        "surface component __P",
+        "native portal props.__P"
+      ]
+    },
+    "qualification": "Existing peer minima equal the installed tested versions. Internal ownership APIs are used; no new dependency or peer ceiling and no future-release compatibility claim."
+  },
+  "verification": {
+    "repositoryGate": {
+      "status": "pass",
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "seconds": 398.95857016701484,
+      "includes": [
+        "verify:inner",
+        "lint",
+        "typecheck",
+        "JavaScript tests",
+        "generated artifacts",
+        "runtime size checks",
+        "native tests and five complete Fluid outputs",
+        "build",
+        "packed consumers"
+      ],
+      "javascript": {
+        "passed": 2089,
+        "gatedSkips": 4991,
+        "filesPassed": 116,
+        "filesGated": 140,
+        "seconds": 316.93
+      },
+      "native": {
+        "passed": 844,
+        "skipped": 0,
+        "completeFluidOutputsValidated": 5
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "seconds": 59.61
+      }
+    },
+    "browserGate": {
+      "status": "pass",
+      "command": "HTMLNEXT_FIREFOX_ENDPOINT=<owned Linux endpoint> corepack pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts packages/html-next-converter/tests/react-plain-hydration-parity.test.ts packages/html-next-converter/tests/react-columns-parity.test.ts --maxWorkers=1 --bail=1",
+      "passed": 173,
+      "skipped": 0,
+      "filesPassed": 3,
+      "seconds": 289.073322209,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "groups": {
+        "sharedMatrix": {
+          "passed": 42,
+          "targets": [
+            "live",
+            "Vanilla",
+            "Vue",
+            "React",
+            "Preact",
+            "Svelte",
+            "Angular"
+          ],
+          "builds": [
+            "development",
+            "production"
+          ],
+          "mode": "fresh rendering, reactive updates, native control edits, source transfers and whole-mount reconnect"
+        },
+        "nativeHydration": {
+          "passed": 12,
+          "targets": [
+            "React",
+            "Preact"
+          ],
+          "mode": "actual framework SSR/hydrateRoot under StrictMode; native Suspense and React Activity with independent native lifecycle control"
+        },
+        "existingColumns": {
+          "passed": 119,
+          "targets": [
+            "React",
+            "Preact"
+          ],
+          "mode": "fresh and actual hydration, compiled/native/wrapped consumers, keyed updates, contexts, warnings, StrictMode and discarded concurrent render checks; includes one server-only case"
+        }
+      },
+      "firefoxHost": "Linux arm64 Docker",
+      "firefoxImage": "mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f"
+    },
+    "focusedHistorical": {
+      "converterTargetsAndServer": {
+        "passed": 168,
+        "seconds": 54.21,
+        "qualification": "Before final presence/lifecycle/core reconnect additions; superseded by final repository/browser gates."
+      },
+      "ordinaryBundlePruning": {
+        "passed": 2,
+        "qualification": "Both actual ordinary named/default browser bundles omit PlainFrame/PlainBoundary/native ownership helpers."
+      },
+      "coreReactivity": {
+        "passed": 60,
+        "gatedSkips": 330,
+        "seconds": 1.32
+      },
+      "liveVanillaReconnect": {
+        "passed": 2,
+        "filtered": 40,
+        "seconds": 10.38
+      },
+      "typecheck": "pass without relaxing exactOptionalPropertyTypes"
+    },
+    "unitReview": {
+      "method": "One bounded inline unit review and simplification under owner single-agent cost guidance",
+      "independentOrCrossModelReview": false,
+      "proofTestsPreserved": true,
+      "wholeGoalReady": false
+    }
+  },
+  "qualificationLimits": [
+    "Native C# source is unchanged. Its tests and complete Fluid output checks are regression evidence, not native hydration or performance qualification.",
+    "Native React/Preact ownership fields and serialization protocols are internal. Exact tested minima are recorded; future release compatibility remains a maintenance concern.",
+    "The native hydration/lifecycle cases use the development framework SSR/client builds. Production fresh-render coverage is supplied by the shared matrix; full production native SSR/lifecycle combinations remain part of whole-goal qualification.",
+    "React/Preact still use the older repeated-slot selection. Single conditional and accepting receiving variants need alignment to shared retainedSlotNames with correct decorated projection ownership.",
+    "Accepted presets, remaining setup/context/filtering boundaries, deeper native provider/streaming/namespace combinations and source-order forwarding/control interactions remain unqualified. No support exclusion is established by these limits.",
+    "Passing current table warnings, including existing unsupported preset behavior, does not prove complete accepted-preset semantics.",
+    "No feature latency, throughput, allocation, retained-memory or peak-memory improvement is claimed. Complete refreshed real Looma all-target three-engine behavior/hydration and comparable cached Fluid/Node measurements remain open.",
+    "Shared smallest-client analysis for both servers, native assets/preparation/identity/rendered-form/interoperable hydration, remaining native CSS/styles/formatting/validation and final protected release-readiness work remain open.",
+    "No package publication or visibility change. Full original ship-ready goal remains active."
+  ],
+  "sourceHashes": {
+    "CHANGELOG.md": "2a4c225f087f1a744a038026031a0cc3d9a7d4f9bd718ad70890f900e4710de8",
+    "packages/html-next-converter/tests/converter.test.ts": "d1aa662ee530eff1db6e2038562c2230c2f4cb4330357049304a223bffc688a3",
+    "packages/html-next-converter/tests/fixtures/plain-slot-rendering.ts": "4cc84a265f2efdbfcde0b9d9e8f82fb9ed2edd6f8533aab4009cbf5c10a049a5",
+    "packages/html-next-converter/tests/react-plain-hydration-parity.test.ts": "e8ccf80355b49c18806e9d6fbf9acfb7a2dc233b011fa40580f485a2944768a9",
+    "packages/html-next-converter/tests/react-columns-parity.test.ts": "5d927de378fa8bc65de9bb427b979ad804320e9f44a9c0b51f117c9206fb5ff1",
+    "packages/html-next/src/targets/react-plain-source.ts": "ddc3416a5578b7a307d8dbb3afd1fa1825b1eb4d03c1190c7c783842b67d40a0",
+    "packages/html-next/src/targets/react-plain-native-source.ts": "2548ca1a28e925c7555ff0beff7a708727aee89dfaf0229794810fa06bcb6971",
+    "packages/html-next/src/targets/react-render.ts": "7e19a9edbef6ce147e4c95b65fcfa665b627ecf2135df0fad161e72c16c06c4d",
+    "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts": "49006a87f376b0b7f57ac24b364aec3601e335d7ef5032174c258021415c7dcc",
+    "packages/html-next/src/rendered-form.ts": "0c365234804cb04f3f92d499c5ca77fb0e0b388488a85a83493848567cf92f7c",
+    "packages/html-next/src/runtime.ts": "d5d9e43b464101e16013f30892bc8ccbcf053a1354aa0e0bd2f9bb8536399d08",
+    "packages/html-next/src/generated-runtime.ts": "e72e8b01330df69894cc57c6622d6d9fe9b18a6a6e72e9356d9041d4dfeccc61"
+  },
+  "sourceFreeze": "All implementation, tests and changelog frozen before the final repository and browser runs. Only this evidence receipt and private continuity/review notes are added after that freeze.",
+  "recordedAt": "2026-11-07T17:58:32.445168+00:00"
+}

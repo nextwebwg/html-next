@@ -41,7 +41,7 @@ describe("component package assembler", () => {
   for (const kind of ["module", "controller"]) it(`activates nested ${kind}s after their importing ancestor`, async () => {
     const root = await mkdtemp(join(tmpdir(), "html-next-package-order-")); temporary.push(root);
     for (const name of ["parent", "child"]) {
-      await writeFile(join(root, `${name}.html`), `<template component="x-${name}" ${kind}="./${name}.js"><section><slot></slot></section></template>`);
+      await writeFile(join(root, `${name}.html`), `<template component="x-${name}" ${kind}="./${name}.js"><section $attributes><slot></slot></section></template>`);
       await writeFile(join(root, `${name}.js`), `${name === "parent" ? 'await new Promise(resolve => window.releaseParent = resolve);' : 'window.childImported = true;'}
         export ${kind === "module" ? "function connect" : "default function"}(host) { window.connections.push(host.root.id); ${kind === "controller" ? name === "parent" ? "return new Promise(resolve => window.parentCleanup = resolve);" : "window.parentCleanup?.(() => {});" : ""} }`);
     }
@@ -69,6 +69,48 @@ describe("component package assembler", () => {
       assert.deepEqual(window.connections, ["parent", "child"]);
       entry?.stop?.();
     } finally { entry?.stop?.(); window.releaseParent?.(); await new Promise(resolve => setTimeout(resolve, 0)); dom.window.close(); vi.unstubAllGlobals(); }
+  });
+
+  it("creates native child controls from a standalone packaged factory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "html-next-package-controls-"));
+    temporary.push(root);
+    const source = join(root, "pager.html");
+    await writeFile(source, [
+      '<link rel="component" href="./ui-button.html">',
+      '<template component="ui-pager"><nav><ui-button aria-label="Previous">Back</ui-button>',
+      '<ui-button disabled>Next</ui-button><external-mark></external-mark></nav></template>',
+      '<template component="ui-recursive"><div><ui-recursive></ui-recursive></div></template>',
+    ].join(""));
+    await writeFile(join(root, "ui-button.html"), await readFile(join(fixture, "ui-button.html")));
+    const outDirectory = join(root, "output");
+    await assembleComponentPackage({ name: "@example/pager", version: "1.0.0", outDirectory,
+      components: [{ source }, { source: join(root, "ui-button.html") }] });
+    const bundle = await build({
+      stdin: { contents: 'export { createUiPager } from "./UiPager.js"; export { createUiRecursive } from "./UiRecursive.js";',
+        resolveDir: join(outDirectory, "vanilla") },
+      bundle: true, write: false, format: "iife", globalName: "library",
+      define: { "import.meta.url": JSON.stringify("https://example.test/components.js") }, loader: { ".css": "empty" },
+      alias: { "@nextwebwg/html-next/generated-runtime": fileURLToPath(new URL("../src/generated-runtime.ts", import.meta.url)) },
+    });
+    const dom = new JSDOM("", { runScripts: "outside-only" });
+    try {
+      const library = dom.window.eval(bundle.outputFiles[0]!.text + "\nlibrary") as {
+        createUiPager(): HTMLElement; createUiRecursive(): HTMLElement;
+      };
+      const pager: HTMLElement = library.createUiPager();
+      dom.window.document.body.append(pager);
+      const buttons = pager.querySelectorAll("button");
+      assert.equal(buttons.length, 2);
+      assert.equal(buttons[0]!.getAttribute("aria-label"), "Previous");
+      assert.equal(buttons[0]!.textContent, "Back");
+      assert.equal(buttons[1]!.disabled, true);
+      let clicks = 0;
+      pager.addEventListener("click", () => clicks++);
+      buttons.forEach(button => button.click());
+      assert.equal(clicks, 1);
+      assert.ok(pager.querySelector("external-mark"));
+      assert.throws(() => library.createUiRecursive(), /HR008/);
+    } finally { dom.window.close(); }
   });
 
   it("discovers prepared module exports without evaluating them and revisions their relative dependencies", async () => {

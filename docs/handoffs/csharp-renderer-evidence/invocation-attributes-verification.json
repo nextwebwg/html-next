@@ -1,0 +1,337 @@
+{
+  "recordedAt": "2026-11-06T21:11:44.799268+00:00",
+  "baseCommit": "d1b95d93d709b9cc5791b9a932fb7442e0b93179",
+  "scope": "Incremental native ordinary invocation attribute forwarding. Full renderer goal remains active. Collisions and class/style forwarding are explicitly unfinished.",
+  "authority": {
+    "proposal": "nextwebwg/specs components.md native lowering/delegated roots; bindings.md literal/from forms.",
+    "pendingDecision": "Proposal says template-owned attributes/prop targets take precedence; current Node literals are overridden by the invocation. Owner was asked which rule to align. No answer received at this checkpoint."
+  },
+  "implementation": [
+    "Immutable forwarding entries reuse ordinary attribute serialization, escaping, URL filtering and literal fallbacks.",
+    "Request-local depth frames preserve caller scope and separate native child roots from delegation.",
+    "Attributes that become props farther down a delegated chain are converted using the destination HTML type and consumed.",
+    "Compilation marks possible receivers and propagates through delegated roots, keeping forwarding operations out of unrelated templates.",
+    "Unplaced carriers write caller attributes while callee setup remains deferred."
+  ],
+  "verification": {
+    "finalGate": {
+      "command": "CHOKIDAR_USEPOLLING=1 PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "result": "pass",
+      "includes": [
+        "verify:inner",
+        "build",
+        "test:package"
+      ],
+      "javascript": {
+        "passed": 1960,
+        "gatedSkips": 4715,
+        "filesPassed": 111,
+        "filesSkipped": 135,
+        "seconds": 302.78
+      },
+      "native": {
+        "passed": 686,
+        "skipped": 0,
+        "fluidCompleteOutputsValidated": 5
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "seconds": 61.34
+      }
+    },
+    "focused": {
+      "sharedFixtures": 28,
+      "nodePassed": 28,
+      "nativeAssertions": "Every fixture Render/Write, concurrent reuse, plus a concurrent getter-once test and a native ASCII/non-ASCII alias-resolution test.",
+      "nativeTotalSuite": 686
+    },
+    "outputParsing": {
+      "comparisons": 168,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "hosts": [
+        "Native",
+        "Node"
+      ],
+      "assertions": "Complete visible output or exact unplaced carrier content, removing only known renderer metadata/region markers.",
+      "nativeHydrationClaim": false
+    },
+    "review": {
+      "status": "complete",
+      "method": "One bounded inline ce-code-review pass under owner cost guidance",
+      "remainingActionableInIncrementalUnit": 0,
+      "independentOrCrossModelReview": false,
+      "fullGoalComplete": false
+    },
+    "simplification": "One inline ce-simplify-code pass; reuse existing conversion/serialization/ASCII comparison and retain lazy forwarding state. Proof tests preserved."
+  },
+  "proofBeforeFix": {
+    "original21Fixtures": "Node21pass; native21fail at existing unsupported invocation attribute check. All21pass after implementation.",
+    "nativeAliasResolution": "New delegated non-ASCII test observed lower:lower instead of lower:upper. Match the receiving prop using the same whole-contract order as compilation; native regression passes.",
+    "correctedExpectations": "Three waiting ordinary-attribute expectations initially assumed pending declared-prop behavior. Both Node and native removed the initial null. Expected values corrected; no runtime change and no red-to-green claim for those three."
+  },
+  "allocations": {
+    "method": "Warmed per-thread allocation, 200 repetitions of each core profile; complete outputs validated outside profiling.",
+    "core": [
+      {
+        "name": "card",
+        "repetitions": 200,
+        "nativeTotalBytes": 240,
+        "fluidTotalBytes": 704,
+        "nativeBindingBytes": 64,
+        "nativeWriterBytes": 64,
+        "nativeOutputBufferAndStringBytes": 176,
+        "fluidWriterBytes": 464,
+        "fluidOutputBufferAndStringBytes": 240
+      },
+      {
+        "name": "list-10",
+        "repetitions": 200,
+        "nativeTotalBytes": 1984,
+        "fluidTotalBytes": 4648,
+        "nativeBindingBytes": 784,
+        "nativeWriterBytes": 784,
+        "nativeOutputBufferAndStringBytes": 1200,
+        "fluidWriterBytes": 3384,
+        "fluidOutputBufferAndStringBytes": 1264
+      },
+      {
+        "name": "list-100",
+        "repetitions": 200,
+        "nativeTotalBytes": 19264,
+        "fluidTotalBytes": 37770.52,
+        "nativeBindingBytes": 7264,
+        "nativeWriterBytes": 7264,
+        "nativeOutputBufferAndStringBytes": 12000,
+        "fluidWriterBytes": 25706.52,
+        "fluidOutputBufferAndStringBytes": 12063.999999999996
+      },
+      {
+        "name": "list-1000",
+        "repetitions": 200,
+        "nativeTotalBytes": 195664,
+        "fluidTotalBytes": 502853.8,
+        "nativeBindingBytes": 72064,
+        "nativeWriterBytes": 72064,
+        "nativeOutputBufferAndStringBytes": 123600,
+        "fluidWriterBytes": 248921.64,
+        "fluidOutputBufferAndStringBytes": 253932.15999999997
+      },
+      {
+        "name": "cart-100",
+        "repetitions": 200,
+        "nativeTotalBytes": 19072,
+        "fluidTotalBytes": 54253.04,
+        "nativeBindingBytes": 10592,
+        "nativeWriterBytes": 10592,
+        "nativeOutputBufferAndStringBytes": 8480,
+        "fluidWriterBytes": 45706.52,
+        "fluidOutputBufferAndStringBytes": 8546.520000000004
+      }
+    ],
+    "baselineNativeBytes": [
+      240,
+      1984,
+      19264,
+      195664,
+      19072
+    ],
+    "unchanged": true,
+    "forwardingFixtures": [
+      {
+        "name": "literal-ordinary",
+        "nativeRenderBytes": 616,
+        "outputBytes": 103,
+        "outputSha256": "a97c7c28bb1b182c2c4df77f7e979897fbd8068ec81b5e73c1c4ca710c74d0fe"
+      },
+      {
+        "name": "dynamic-string",
+        "nativeRenderBytes": 496,
+        "outputBytes": 38,
+        "outputSha256": "d52657926525eb5e991e9d9902fe8d50dc89784cb3f2c90c32f26981755bdc15"
+      },
+      {
+        "name": "dynamic-number",
+        "nativeRenderBytes": 480,
+        "outputBytes": 35,
+        "outputSha256": "0b3293afe0205698808bcf4148719eeba294ee3c6fc9dd7ddc42f9f81936a12a"
+      },
+      {
+        "name": "dynamic-list",
+        "nativeRenderBytes": 496,
+        "outputBytes": 44,
+        "outputSha256": "f4218d53026bae8ea12975eb26090e58e637879c8aba83736c9e314ecffe9b62"
+      },
+      {
+        "name": "removes-false",
+        "nativeRenderBytes": 456,
+        "outputBytes": 24,
+        "outputSha256": "cf199a008fdfdb7232a63e0d93aacd79ff2d7ec882c9734c7793e177a717a3a3"
+      },
+      {
+        "name": "removes-null",
+        "nativeRenderBytes": 456,
+        "outputBytes": 24,
+        "outputSha256": "cf199a008fdfdb7232a63e0d93aacd79ff2d7ec882c9734c7793e177a717a3a3"
+      },
+      {
+        "name": "invalid-keeps-literal",
+        "nativeRenderBytes": 496,
+        "outputBytes": 41,
+        "outputSha256": "1cf0fe9a119836d65184a112f95c4313920cfdefe54341da342f6b0236464fc5"
+      },
+      {
+        "name": "invalid-without-literal",
+        "nativeRenderBytes": 464,
+        "outputBytes": 24,
+        "outputSha256": "cf199a008fdfdb7232a63e0d93aacd79ff2d7ec882c9734c7793e177a717a3a3"
+      },
+      {
+        "name": "boolean-and-enumerated",
+        "nativeRenderBytes": 536,
+        "outputBytes": 64,
+        "outputSha256": "ed5baa14f9a17e9c08ab887f016f074b924f0c227bb7e2e1a4b60e193da99e13"
+      },
+      {
+        "name": "safe-url",
+        "nativeRenderBytes": 504,
+        "outputBytes": 47,
+        "outputSha256": "1c56cea944ad0c1301e463dd04bdd27a2e7fd4185eb60a4942ada507bd595bde"
+      },
+      {
+        "name": "unsafe-url-removes-literal",
+        "nativeRenderBytes": 456,
+        "outputBytes": 24,
+        "outputSha256": "04c265d87f94de526b2cb9275a4131fafebe9f1ded034e7e92bb0bcc2b04f69f"
+      },
+      {
+        "name": "root-literal-then-forwarded",
+        "nativeRenderBytes": 512,
+        "outputBytes": 51,
+        "outputSha256": "934e8c8a89e66a5c34c71cf64759c66d7d3341364d39a405373936065da0525b"
+      },
+      {
+        "name": "forwarded-before-root-binding",
+        "nativeRenderBytes": 504,
+        "outputBytes": 48,
+        "outputSha256": "1619e0f00bbf28fe2adebd15f69df1cf28bd40d93839dca2ae3e30d76448f9e8"
+      },
+      {
+        "name": "delegation",
+        "nativeRenderBytes": 536,
+        "outputBytes": 52,
+        "outputSha256": "60a1b0b4b7128a9e5e70cff1d73193bd36b1be4654cf62f543dbec1ba197d2ee"
+      },
+      {
+        "name": "delegated-prop-consumes-forwarded",
+        "nativeRenderBytes": 496,
+        "outputBytes": 26,
+        "outputSha256": "c83a006393873c6301b6af4341dce28ce2869730d8cfac21bb0f492a438f115f"
+      },
+      {
+        "name": "delegated-number-prop-converts-html",
+        "nativeRenderBytes": 504,
+        "outputBytes": 21,
+        "outputSha256": "2f7a3d38ca30845f68a479fa68f2fb1efc2b4db9bc4a0d3046f91b7e7e1eb241"
+      },
+      {
+        "name": "declared-prop-is-consumed",
+        "nativeRenderBytes": 488,
+        "outputBytes": 36,
+        "outputSha256": "91ace398bda6582552f46e54fef45f9840abf3dea091dbc57370799ec52ca33d"
+      },
+      {
+        "name": "root-selection",
+        "nativeRenderBytes": 496,
+        "outputBytes": 44,
+        "outputSha256": "ea93db6723b243c52471705c455b173b1d34980d50291822b23e1be59f6056df"
+      },
+      {
+        "name": "repeated-caller-scope",
+        "nativeRenderBytes": 608,
+        "outputBytes": 61,
+        "outputSha256": "cc16c8d49c57f10b60769cff6d1b480e9d15e8218b478eea9e1ed144a15ed815"
+      },
+      {
+        "name": "separate-root-ownership",
+        "nativeRenderBytes": 544,
+        "outputBytes": 54,
+        "outputSha256": "5afa384817f6682dbbb4b5f58804ee8395e5ed31e1d78e2422e6037c67be0fa0"
+      },
+      {
+        "name": "deferred-caller-attributes",
+        "nativeRenderBytes": 672,
+        "outputBytes": 103,
+        "outputSha256": "f1c808753a5083fec05df9644d55082c7f2623c1909e15293ef6baea05f463aa"
+      },
+      {
+        "name": "waiting",
+        "nativeRenderBytes": 656,
+        "outputBytes": 24,
+        "outputSha256": "cf199a008fdfdb7232a63e0d93aacd79ff2d7ec882c9734c7793e177a717a3a3"
+      },
+      {
+        "name": "waiting-computed",
+        "nativeRenderBytes": 656,
+        "outputBytes": 24,
+        "outputSha256": "cf199a008fdfdb7232a63e0d93aacd79ff2d7ec882c9734c7793e177a717a3a3"
+      },
+      {
+        "name": "waiting-default",
+        "nativeRenderBytes": 688,
+        "outputBytes": 38,
+        "outputSha256": "b796e5a210906b928e336a31d2f24b81dea0152293c7e1771f36936b04793137"
+      },
+      {
+        "name": "available-absence",
+        "nativeRenderBytes": 656,
+        "outputBytes": 24,
+        "outputSha256": "cf199a008fdfdb7232a63e0d93aacd79ff2d7ec882c9734c7793e177a717a3a3"
+      },
+      {
+        "name": "unread-waiting",
+        "nativeRenderBytes": 688,
+        "outputBytes": 38,
+        "outputSha256": "b796e5a210906b928e336a31d2f24b81dea0152293c7e1771f36936b04793137"
+      },
+      {
+        "name": "deferred-waiting-ordinary",
+        "nativeRenderBytes": 832,
+        "outputBytes": 89,
+        "outputSha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876"
+      },
+      {
+        "name": "delegated-bracketed-list-converts-html",
+        "nativeRenderBytes": 1632,
+        "outputBytes": 23,
+        "outputSha256": "be687555fe98c258a45ca1ec17fc9fd53ff99c1231afa8d9b348bf2ae06b2a05"
+      }
+    ],
+    "limits": "Newly supported forwarding had no functioning baseline. These values do not establish latency, throughput, peak or retained memory."
+  },
+  "remainingWork": [
+    "Resolve and implement literal/prop collision precedence across Node/C# and generated targets.",
+    "Class/style invocation forwarding and keyed native styles.",
+    "Node Unicode prop case: public proposal disallows only ASCII-case duplicates, but current Node parser rejects \u00e9/\u00c9. This checkpoint tests native behavior only for that regression.",
+    "Remaining native language/type/CSS/formatting, preparation, rendered form and interoperable native hydration.",
+    "Complete real Looma rendering/behavior/hydration gates for every target, and complete Fluid/Node speed and memory qualification.",
+    "Package/release-readiness work remains; no package publication or visibility change."
+  ],
+  "sourceSha256": {
+    "CHANGELOG.md": "85043f90dd0f0412958d5f2710c2643c0d3fe4879541e5b2d80df837ddd8bb3b",
+    "packages/html-next-dotnet/README.md": "f73deb873856cca9215629426a1425aed573ee6d96f9874b7448cadeae9a5e78",
+    "packages/html-next-dotnet/src/HtmlNext/BoundAttribute.cs": "cffa1aed1fb12c303aeef304444714b02ba89068bbc79d61b4f89f1929960646",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "da0ef1ee88a6400d54cca7f28b3b33850d861572227eed6cde47a9763b2eadf4",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentCall.cs": "65c4bebb74510603540449218c20918706119ee6c23b51b197f0c5f1f99767f4",
+    "packages/html-next-dotnet/src/HtmlNext/ComponentGraph.cs": "21c43865d968e2263458b892c6b6610640786c7fd1d0d57e1b53b66fb3e9e699",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "f36171fd5394871d06b7e47590351d0fdc43c5517fe42133c68e2a36b702eaf6",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HtmlNext.Tests.csproj": "24e49875ba96486f5e223d5ea9084194dde58d8c38b2f499b3d9a403b3934728",
+    "packages/html-next-dotnet/src/HtmlNext/InvocationAttributes.cs": "4d57533fa1c4b8edaf57757c8ba1044a4e28e2ebe518db2c29ec3da3eec8293f",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/InvocationAttributeTests.cs": "b4aadcb8f0cb7b4a9dcafa11022a9521534cdfa4a1995477decafae11eca2f86",
+    "packages/html-next-dotnet/tests/fixtures/invocation-attributes.json": "bc0a5b3fffdcf5524b32b8a38ac66041816e8eaa875f995935333c5bef9140dc",
+    "packages/html-next/tests/native-invocation-attributes.test.ts": "90fb436a536a4094b3766d6fd7e6c2bf12599d497df7ead344e3060faba021d6"
+  }
+}

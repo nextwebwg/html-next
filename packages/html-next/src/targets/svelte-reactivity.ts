@@ -40,7 +40,7 @@ export function initializedState<T>(evaluate: () => { value: unknown; status: In
     seed = undefined;
     // A lazy read may run inside a derived. The accepted cell is created during setup;
     // claiming it is a one-time untracked write, while subsequent reads track it normally.
-    untrack(() => { value = copy(next.value) as T; });
+    untrack(() => { const owned = $state(copy(next.value) as T); value = owned; });
   };
   const state = {
     get value(): T | null | undefined { initialize(); return value; },
@@ -48,7 +48,8 @@ export function initializedState<T>(evaluate: () => { value: unknown; status: In
       if (next != null && !accepts(next)) { warn(); return; }
       initialized = true;
       seed = undefined;
-      value = next ?? null;
+      const owned = $state(next ?? null);
+      value = owned;
     },
     status(): InputStatus {
       // Waiting status readers must also observe an early local claim of the cell.
@@ -56,7 +57,8 @@ export function initializedState<T>(evaluate: () => { value: unknown; status: In
       return initialized ? READY_INPUT
         : { ...seed!.get().status, ready: false, stale: false };
     },
-    start(): void { $effect(() => { if (!initialized) void state.value; }); },
+    // Prepare the draft before template deriveds can become the owner of its proxy sources.
+    start(): void { $effect.pre(() => { if (!initialized) void state.value; }); },
   };
   return state;
 }

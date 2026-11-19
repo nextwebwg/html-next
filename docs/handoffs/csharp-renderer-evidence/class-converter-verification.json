@@ -1,0 +1,276 @@
+{
+  "recordedAt": "2026-11-06T20:45:12.010209+00:00",
+  "baseCommit": "ceaca829a3e5ee340361694c6e7ef67f776f858c",
+  "scope": "Incremental converter native-element class binding correctness and React row structure within the active full native renderer goal. No native C# source change in this unit.",
+  "implementation": {
+    "sharedOwners": "Initial class serialization and accepted-result DOM writes are shared. Vue and Angular share initialization that preserves matching server output. React and Preact class-only descendants use callback refs, weak per-element state and a stable component/template-site token. Svelte uses its existing decoration attachment.",
+    "remainingOwners": "Existing owners remain for events, native properties, dynamic form paths, root forwarding and invalid-value/key recovery."
+  },
+  "verification": {
+    "finalGate": {
+      "command": "CHOKIDAR_USEPOLLING=1 PATH=/Users/matthew/.dotnet:$PATH TMPDIR=/private/tmp corepack pnpm verify:pr",
+      "result": "pass",
+      "includes": [
+        "verify:inner",
+        "build",
+        "test:package"
+      ],
+      "javascript": {
+        "passed": 1932,
+        "gatedSkips": 4715,
+        "filesPassed": 110,
+        "filesSkipped": 135,
+        "seconds": 332.76
+      },
+      "native": {
+        "passed": 656,
+        "skipped": 0,
+        "fluidCompleteOutputsValidated": 5
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "seconds": 57.48
+      }
+    },
+    "focusedClassesAndServers": {
+      "command": "corepack pnpm exec vitest run packages/html-next/tests/targets.test.ts packages/html-next/tests/native-class-bindings.test.ts",
+      "passed": 108,
+      "seconds": 8.41,
+      "serverComparisons": "19 shared native from:class fixtures rendered through actual Vue and React servers, 38 comparisons."
+    },
+    "browserRegressions": {
+      "command": "HTMLNEXT_TARGET_TEST=1 MOZ_APP_DATA=<owned-app-data> MOZ_LOCAL_APP_DATA=<owned-local-data> corepack pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/class-binding-order-parity.test.ts packages/html-next-converter/tests/react-dynamic-control-parity.test.ts packages/html-next-converter/tests/react-property-parity.test.ts --maxWorkers=1",
+      "passed": 66,
+      "seconds": 121.2,
+      "classOrder": {
+        "scenarios": 42,
+        "targets": [
+          "live",
+          "Vanilla",
+          "Vue",
+          "React",
+          "Preact",
+          "Svelte",
+          "Angular"
+        ],
+        "builds": [
+          "development",
+          "production"
+        ],
+        "engines": [
+          "Chromium",
+          "Firefox",
+          "WebKit"
+        ],
+        "assertions": [
+          "Both binding orders around from:class",
+          "Overlapping literal and forced class tokens",
+          "No-op raw duplicate/whitespace preservation",
+          "Invalid results and recovery",
+          "DOM-added tokens and keyed row reordering",
+          "Root class owner and later updates"
+        ]
+      },
+      "existingReactDynamicControls": 12,
+      "existingReactNativeProperties": 12
+    },
+    "scopedStylesAndFrameworkHydration": {
+      "case": "class bindings preserve scoped styles through replacements and toggles",
+      "passed": 30,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "modes": [
+        "application",
+        "library"
+      ],
+      "assertions": [
+        "Client rendering",
+        "Actual framework SSR",
+        "Framework hydration",
+        "Exact raw no-op class text",
+        "Scoped computed styles and pixels",
+        "Later replacement/toggle/invalid/recovery interactions"
+      ],
+      "phases": [
+        {
+          "targets": [
+            "React",
+            "Preact",
+            "Svelte"
+          ],
+          "passed": 18,
+          "sameRelevantImplementationAfterFinalSharedInitRefactor": true
+        },
+        {
+          "targets": [
+            "Vue",
+            "Angular"
+          ],
+          "passed": 12,
+          "seconds": 207.44,
+          "finalSharedInitialization": true
+        }
+      ],
+      "nativeHydrationClaim": false
+    },
+    "review": {
+      "status": "complete",
+      "method": "One bounded inline ce-code-review pass under owner cost guidance",
+      "actionableFindings": 0,
+      "independentOrCrossModelReview": false,
+      "scope": "Current converter unit against baseCommit, not full renderer readiness."
+    },
+    "simplification": {
+      "method": "Single inline ce-simplify-code pass",
+      "additionalChanges": 0,
+      "proofTestsPreserved": true
+    }
+  },
+  "proofBeforeFix": {
+    "classOrder": "6 live controls passed; 30 generated scenarios failed; Vue failed compilation before its 6 cases because it emitted duplicate class bindings.",
+    "vueSsr": "Actual Vue SSR trimmed authored raw class text through its normal class serializer; use its raw className serialization path.",
+    "svelteScopes": "6 scoped-style SSR cases failed after class replacement discarded the generated scope marker.",
+    "rawHydration": "6 Vue cases then 6 Angular cases doubled unchanged literal class tokens on hydration; the same exact-byte assertion passes after shared initialization.",
+    "generatedTypes": "Existing nested React consumer failed boolean-vs-symbol comparisons; existing Preact corpus failed Signalish root className typing. Both corrected without weakening assertions.",
+    "nonProductFailures": "Initial harness visibility wait and an intermediate multiline-string indentation error were corrected. Firefox required owned application-data directories; default-profile launch failures happened before page load."
+  },
+  "reactClassUpdateProbe": {
+    "browser": "156.0.8078.4",
+    "node": "v24.20.0",
+    "baseline": "ceaca829 React generator and classText source with unchanged dependency owners",
+    "sizes": [
+      {
+        "mode": "before",
+        "bytes": 253111,
+        "gzip": 78924,
+        "sha256": "8300d8071adb7e0597825905df902112be1e35731542c2491be1d2cc74f4aa23"
+      },
+      {
+        "mode": "after",
+        "bytes": 253925,
+        "gzip": 79194,
+        "sha256": "72f716ce8f5951f5e9adaaaad3865af39d0dc30577de918302aa6a7346335540"
+      }
+    ],
+    "reports": [
+      {
+        "mode": "after",
+        "count": 100,
+        "repetitions": 50,
+        "samples": [
+          0.17599999964237212,
+          0.1560000002384186,
+          0.1560000002384186,
+          0.15599999964237213,
+          0.16,
+          0.15599999964237213,
+          0.15400000035762787,
+          0.15599999964237213,
+          0.1560000002384186
+        ],
+        "medianMs": 0.1560000002384186
+      },
+      {
+        "mode": "before",
+        "count": 100,
+        "repetitions": 50,
+        "samples": [
+          0.1819999998807907,
+          0.17399999976158143,
+          0.16,
+          0.15599999964237213,
+          0.15800000011920928,
+          0.1560000002384186,
+          0.15799999952316285,
+          0.1560000002384186,
+          0.15199999988079071
+        ],
+        "medianMs": 0.15799999952316285
+      },
+      {
+        "mode": "after",
+        "count": 1000,
+        "repetitions": 50,
+        "samples": [
+          1.474000000357628,
+          1.4580000001192093,
+          1.4819999998807907,
+          1.474000000357628,
+          1.4680000001192093,
+          1.4780000001192093,
+          1.474000000357628,
+          1.4619999998807907,
+          1.4580000001192093
+        ],
+        "medianMs": 1.474000000357628
+      },
+      {
+        "mode": "before",
+        "count": 1000,
+        "repetitions": 50,
+        "samples": [
+          1.45,
+          1.445999999642372,
+          1.4419999998807906,
+          1.5360000002384187,
+          1.4480000001192093,
+          1.43,
+          1.44,
+          1.46,
+          1.445999999642372
+        ],
+        "medianMs": 1.445999999642372
+      }
+    ],
+    "limitation": "Locating Chromium class-update timings from nine batches after 500 warm-up updates, not a full framework benchmark or allocation/retained-memory claim. Complete output validation occurs outside timed sections.",
+    "template": "<template component=\"x-perf\"><defs><prop name=\"flag\" type=\"boolean\" default=\"false\">Active.</prop><prop name=\"rows\" type=\"list(object({ label: string }))\">Rows.</prop></defs><ul><li $each=\"row of $rows\" $key=\"$row.label\" class=\"row\" class:active=\"$flag\">{$row.label}</li></ul></template>",
+    "method": {
+      "warmupUpdates": 500,
+      "batches": 9,
+      "updatesPerBatch": 50,
+      "trigger": "Toggle the flag prop through React createRoot/flushSync.",
+      "validation": "Full row count, every row text and exact class attribute validated before warm-up, after warm-up and after every timed batch, outside timed sections.",
+      "ownConcurrentChecksDuringSelectedRun": false
+    }
+  },
+  "reactClassUpdateRatios": [
+    {
+      "rows": 100,
+      "ratio": 0.9873417766406318
+    },
+    {
+      "rows": 1000,
+      "ratio": 1.0193637626017849
+    }
+  ],
+  "qualificationLimits": [
+    "This change does not complete native invocation forwarding, standalone native styles, preparation or native hydration.",
+    "The complete real Looma behavior/hydration gate and complete Fluid/Node speed and memory qualification remain open in the full renderer goal.",
+    "Browser/target gated skips in verify:pr are reported above; focused browser checks supplement them.",
+    "The Chromium update probe supports this workload only; no absolute React, allocation, retained-memory or peak-memory claim.",
+    "No package publication or visibility change."
+  ],
+  "sourceSha256": {
+    "CHANGELOG.md": "7b0610d29b624360ac1073a58f781ed32733c6da84b0f377b1f0076fd513a2db",
+    "packages/html-next-converter/tests/converter.test.ts": "7a831437d56ddd6faabc7481fdb25a0650618ce3b795bce669b205d0c43cdced",
+    "packages/html-next-converter/tests/react-public-conformance-parity.test.ts": "bc9b3d22c435228bdd01c187c30baf262998a59b202677d54368e7ec7f9ebe85",
+    "packages/html-next-converter/tests/svelte-public-conformance-parity.test.ts": "28a38eead9a0062a15dd888c0b9d8fa064b4866e4fece22bde7763943d05de81",
+    "packages/html-next/examples/generated/vue/host.ts": "a969f77d1b43ea719213b607b7c9641492703c19256c5fe37fb43da0b402c3eb",
+    "packages/html-next/src/targets/angular.ts": "38ca1d51544be0fd4ef3f871a1a4d100ced584a1aac453358bf4d0076ab1a591",
+    "packages/html-next/src/targets/attribute-helper.ts": "fb319b9a88a67706fd51aacd58f2c96bf6c607009ab96fc7be2ca67eea1d6d41",
+    "packages/html-next/src/targets/class-text.ts": "edb37a93796edeed84800997a8c6a918cdf1eb9a1947663d51062c914c7daa47",
+    "packages/html-next/src/targets/react.ts": "3a4b7b0a735b2c60f6a7be4f8398ff906cb6951d083ba7c6715c149c560fad8c",
+    "packages/html-next/src/targets/svelte-decorations.ts": "00b7acbb41a0032274ffccdffcc67e0c04b630919247082822b49ac3b890c5f1",
+    "packages/html-next/src/targets/svelte-render.ts": "04567143c949074a8b80ec3f1cf66ae06771bd90692fe0a9db80dd1f78fbf84b",
+    "packages/html-next/src/targets/svelte.ts": "988bab652240019d431dc2611129f13a686fa931d1fb66fe41615cd1a6be9b47",
+    "packages/html-next/src/targets/vanilla-blocks.ts": "72f7b40ad08e967f996c21f0127dec35480aa012de839fa3b75b28f634bc3dac",
+    "packages/html-next/src/targets/vue.ts": "bce08b88882f264cc3877db8e6bd181b3f8166a79f2fec2c9796ea2f4a1b36ff",
+    "packages/html-next/tests/conformance/cases.ts": "7d85ba927e302f31d70ca0ffea0f06f63277244d5798b9aff7aa0cecdd91cc8c",
+    "packages/html-next/tests/targets.test.ts": "be7244a12a3a4bd2cd3da867541ce16249279706873b67c7372ff2a93378483c",
+    "vitest.targets.config.ts": "b0962d2e2471beae3a0c9b3e7b124e20c258ce5f1c12e17f01eb5a71101887c0",
+    "packages/html-next-converter/tests/class-binding-order-parity.test.ts": "c918cf7d232dbfb09b60693a7dea7709d1317b7cb8d00458c8612d0bed938073"
+  }
+}

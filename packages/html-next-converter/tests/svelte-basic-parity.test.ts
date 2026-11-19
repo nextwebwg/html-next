@@ -38,7 +38,7 @@ const fixtures = [
       <state name="rows" type="list(integer)" value="[3, 1, 2]"></state>
       <handler name="change"><set name="rows" expr:value="[2, 4, 1]"></set></handler>
     </defs><div><button type="button" on:click="change">Change</button><ul>
-      <li $each="row, i of $rows" $key="$row" $sort="row" from:data-i="$i" from:data-count="$loop.count" $value="$row"></li>
+      <li $each="row, i of $rows" $key="$row" $sort="row" from:data-i="$i" from:data-count="$rows.length" $value="$row"></li>
     </ul></div><style>:host { display: inline-block; padding: 8px; border: 1px solid #444; }</style></template>`,
     tag: "x-list",
     root: "div",

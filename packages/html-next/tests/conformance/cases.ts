@@ -210,7 +210,7 @@ const successes: ConformanceCase[] = [
     },
   },
   {
-    name: "lets invocation attributes win over template literals and combines class and style",
+    name: "applies authored root attributes after default invocation forwarding",
     source: scene({
       tag: "x-pre",
       defs: `<prop name="label" type="string" default="Bound">Label.</prop>`,
@@ -219,7 +219,7 @@ const successes: ConformanceCase[] = [
     }),
     expect: {
       probe: `const b = q('#p'); return [b.type, b.getAttribute('role'), b.className, b.style.color, b.style.margin, b.getAttribute('aria-label')];`,
-      result: ["submit", "button", "base cta", "red", "0px", "Bound"],
+      result: ["button", "button", "base", "red", "", "Bound"],
     },
   },
   {
@@ -726,21 +726,20 @@ const successes: ConformanceCase[] = [
     },
   },
   {
-    name: "$each with $sort/$limit and the loop object (index/last/count), plus item, i binding",
+    name: "$each with $sort/$limit and explicit item/index aliases",
     source: scene({
       root:
         `<ul><li $each="n, i of [3, 1, 2, 5]" $sort="n" $limit="3" ` +
-        ` from:data-i="$i" from:data-last="$loop.last" from:data-count="$loop.count" $value="$n"></li></ul>`,
+        ` from:data-i="$i" $value="$n"></li></ul>`,
       use: `<x-t id="b"></x-t>`,
     }),
     expect: {
       probe:
-        `return qa('#b li').map(li => [li.getAttribute('data-i'), li.textContent, ` +
-        `li.hasAttribute('data-last'), li.getAttribute('data-count')]);`,
+        `return qa('#b li').map(li => [li.getAttribute('data-i'), li.textContent]);`,
       result: [
-        ["0", "1", false, "3"],
-        ["1", "2", false, "3"],
-        ["2", "3", true, "3"],
+        ["0", "1"],
+        ["1", "2"],
+        ["2", "3"],
       ],
     },
   },
@@ -908,6 +907,44 @@ const successes: ConformanceCase[] = [
       ],
     },
   },
+  {
+    name: "class bindings preserve scoped styles through replacements and toggles",
+    source: scene({
+      defs: `<state name="tokens" type="string" value="first"></state><state name="active" type="boolean" value="true"></state><state name="zero" type="number" value="1"></state>
+        <handler name="next"><set name="tokens" value="second"></set></handler><handler name="off"><set name="active" value="false"></set></handler><handler name="on"><set name="active" value="true"></set></handler>
+        <handler name="invalid"><set name="zero" value="0"></set></handler><handler name="recover"><set name="tokens" value="third"></set><set name="zero" value="1"></set></handler>`,
+      root: `<section class="base" from:class="$zero = 0 ? 1 / 0 : $tokens" class:lit="$active"><p>Styled</p><b id="class-raw" class=" raw  raw " class:unused="false"></b>
+        <button type="button" id="class-next" on:click="next">Next</button><button type="button" id="class-off" on:click="off">Off</button><button type="button" id="class-on" on:click="on">On</button><button type="button" id="class-invalid" on:click="invalid">Invalid</button><button type="button" id="class-recover" on:click="recover">Recover</button></section>`,
+      style: `:host { color: rgb(1, 2, 3); } :host(.lit) { color: rgb(7, 8, 9); } p { background-color: rgb(4, 5, 6); }`,
+      use: `<x-t id="class-scopes"></x-t>`,
+    }),
+    expect: {
+      probe: `const root = q('#class-scopes'); return [getComputedStyle(root).color, getComputedStyle(root.querySelector('p')).backgroundColor, root.classList.contains('lit'), root.classList.contains('manual'), q('#class-raw').getAttribute('class')];`,
+      result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "],
+      after: [
+        { action: `document.querySelector('#class-scopes').classList.add('manual'); document.querySelector('#class-next').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "] },
+        { action: `document.querySelector('#class-scopes').classList.add('manual'); document.querySelector('#class-off').click();`, result: ["rgb(1, 2, 3)", "rgb(4, 5, 6)", false, false, " raw  raw "] },
+        { action: `document.querySelector('#class-on').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "] },
+        { action: `document.querySelector('#class-invalid').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "] },
+        { action: `document.querySelector('#class-recover').click();`, result: ["rgb(7, 8, 9)", "rgb(4, 5, 6)", true, false, " raw  raw "] },
+      ],
+    },
+  },
+  {
+    name: "preserves non-ASCII case in public props and bound attributes",
+    source: scene({
+      defs: `<prop name="é" type="string" default="Lower">Lower.</prop><prop name="É" type="string" default="Upper">Upper.</prop>
+        <state name="label" type="string" value="First"></state><handler name="next"><set name="label" value="Next"></set></handler>`,
+      root: `<section><output id="unicode-props" from:data-é="$é" from:data-É="$É">{$é}:{$É}:{$label}</output><button id="unicode-next" type="button" on:click="next">Next</button></section>`,
+      style: `:host([é="one"]) { --lower-case: lower; } :host([É="TWO"]) { --upper-case: UPPER; }`,
+      use: `<x-t é="one" É="TWO"></x-t>`,
+    }),
+    expect: {
+      probe: `const output = q('#unicode-props'); const style = getComputedStyle(output); return [output.textContent, output.getAttribute('data-é'), output.getAttribute('data-É'), style.getPropertyValue('--lower-case').trim(), style.getPropertyValue('--upper-case').trim()];`,
+      result: ["one:TWO:First", "one", "TWO", "lower", "UPPER"],
+      after: [{ action: `document.querySelector('#unicode-next').click();`, result: ["one:TWO:Next", "one", "TWO", "lower", "UPPER"] }],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -938,12 +975,12 @@ const diagnostics: ConformanceCase[] = [
     name: "an absent required prop lowers with valueMissing validity",
     source: scene({
       defs: `<prop name="label" type="string" required>Label.</prop>`,
-      root: `<div from:data-l="$label"></div>`,
+      root: `<div from:data-l="$label">Ready:{default($label, 'missing')}</div>`,
       use: `<x-t></x-t>`,
     }),
     expect: {
-      probe: `const el = q('div'); return { missing: el.validity.valueMissing, valid: el.validity.valid };`,
-      result: { missing: true, valid: false },
+      probe: `const el = q('div'); return { text: el.textContent, missing: el.validity.valueMissing, valid: el.validity.valid };`,
+      result: { text: "Ready:missing", missing: true, valid: false },
     },
   },
   {
@@ -1049,8 +1086,14 @@ const diagnostics: ConformanceCase[] = [
     expect: { code: "HT006" },
   },
   {
-    name: "HT008: more than one slot",
-    source: scene({ root: `<div><slot></slot><slot></slot></div>`, use: `<x-t></x-t>` }),
+    name: "repeated plain outlets place content at the first outlet",
+    source: scene({ root: `<div><p><slot>First</slot></p><b><slot>Second</slot></b></div>`, use: `<x-t><i>Plain</i></x-t>` }),
+    expect: { probe: `return [q("p").textContent, q("b").textContent, qa("i").length];`, result: ["Plain", "Second", 1] },
+  },
+  {
+    name: "HT008: an outlet repeats a slot prop",
+    source: scene({ defs: `<slot name="cell"><prop name="count" type="number">Count.</prop></slot>`,
+      root: `<div><slot name="cell" count="1" from:count="2"></slot></div>`, use: `<x-t></x-t>` }),
     expect: { code: "HT008" },
   },
   {

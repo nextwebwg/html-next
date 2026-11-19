@@ -408,7 +408,8 @@ if (target.hasChildNodes()) hydrate(App, { target }); else mount(App, { target }
               (window as unknown as { fieldsHost: { state: { choices: string[] } } }).fieldsHost.state.choices.push("c");
             })));
             await compare();
-            assert.equal(await live.locator("#untyped-array").evaluate((element) => (element as HTMLInputElement).defaultValue), "a b");
+            // The binding updates the current property; the authored root retains its reset default.
+            for (const page of pages) assert.equal(await page.locator("#untyped-array").evaluate((element) => (element as HTMLInputElement).defaultValue), "default");
             for (const checked of [[], {}, [1], { present: true }, false, true, 0, 1, "", "checked"]) {
               await Promise.all(pages.map((page) => page.evaluate((value) => {
                 (window as unknown as { fieldsHost: { state: { rawChecked: { value: unknown } } } }).fieldsHost.state.rawChecked.value = value;

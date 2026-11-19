@@ -1,0 +1,196 @@
+{
+  "recordedAt": "2026-11-06T21:54:43.684397+00:00",
+  "baseCommit": "1c4b86d9365b3cf5af3f400abd8c38d71b6e9a8e",
+  "scope": "Incremental Unicode prop/attribute naming and feature-selected React/Svelte child enrollment. Full ship-ready goal remains active and incomplete.",
+  "authority": {
+    "proposal": "https://nextwebwg.org/declarative-components/expressions/: exact identifiers, public prop collisions only under ASCII case folding. No proposal change was needed for this correction.",
+    "ownerDirection": "Make sure you're not forcing something like forcing components into read children slots when they don't have to",
+    "implementationInterpretation": "Only an authored as list requires accepted-child enrollment; ordinary projection retains framework children/snippets. Types that can participate in an as list still enroll for hand-written consumers.",
+    "approvalStatus": "Implementation of the explicit owner direction within the active renderer goal; no new language rule or release authorization inferred."
+  },
+  "implementation": [
+    "Share ASCII-only HTML name folding in parser, contract, runtime, aliases, style resolution and target generation; preserve exact non-ASCII case.",
+    "Use the existing identifier-start grammar for component style prop/state selector names, with removable compiler-only patterns.",
+    "Allocate distinct discarded React local bindings and emit non-ASCII JSX props as own object keys.",
+    "Keep Svelte native elements and existing attribute attachments. A compiler hint and quoted SSR spread preserve affected authored/reflected names without an emitted is attribute.",
+    "Select React/Svelte child-entry hooks only when a receiving slot declares as; ordinary projected children keep native DOM identity."
+  ],
+  "verification": {
+    "finalGate": {
+      "command": "CHOKIDAR_USEPOLLING=1 PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "result": "pass",
+      "includes": [
+        "verify:inner",
+        "build",
+        "test:package"
+      ],
+      "javascript": {
+        "passed": 1967,
+        "gatedSkips": 4793
+      },
+      "native": {
+        "passed": 690,
+        "skipped": 0,
+        "fluidCompleteOutputsValidated": 5
+      },
+      "packedConsumers": {
+        "passed": 8
+      }
+    },
+    "focused": {
+      "coreTestsPassed": 132,
+      "nodeInvocationFixtures": 32,
+      "childEnrollment": "Observed red true != false for accepts without as, then green; actual React and Svelte client/server compilation."
+    },
+    "frameworkBrowser": {
+      "directScenarios": 30,
+      "directAssertions": "Independent prop values, distinct data attributes, exact lower/upper CSS selection, update, SSR/hydration and pixel parity. Application/library, five framework targets, three engines.",
+      "nestedScenarios": 42,
+      "nestedAssertions": "Literal and bound props, delegated root, ordinary projected child without wrapper, retained child identity across updates, native HTMLButtonElement/disabled behavior and no emitted is attribute. Seven targets, development/production, three engines.",
+      "finalNestedRun": "All 42 scenarios pass together after regenerating the canonical literal reader. No skipped scenario is counted as passed."
+    },
+    "nativeNodeOutput": {
+      "comparisons": 192,
+      "fixtures": 32,
+      "hosts": [
+        "C# Render/Write",
+        "Node"
+      ],
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "assertions": "Exact visible output or carrier contents, removing only known renderer metadata/region markers.",
+      "nativeHydrationClaim": false
+    },
+    "review": {
+      "status": "complete",
+      "method": "One bounded inline ce-code-review pass under owner single-agent/cross-model-off guidance",
+      "actionableFindings": 0,
+      "independentOrCrossModelReview": false,
+      "wholeGoalComplete": false
+    }
+  },
+  "proofBeforeFix": {
+    "node": "é/É fixtures reject HC011; mismatched-case forwarding consumes the wrong prop.",
+    "native": "Only É is declared, but é was incorrectly consumed through a Unicode-lowercased alias.",
+    "frameworks": "React duplicate local bindings and invalid quoted JSX attributes; Svelte merges distinct native attribute names.",
+    "styles": "Resolver maps É to é, then public framework style checks expose the ASCII-only selector grammar.",
+    "bundling": "Runtime size checks detect compiler pattern initialization retained in generated bundles; compiler initializers are now tree-shaken."
+  },
+  "costs": {
+    "allocations": {
+      "method": "Warmed per-thread allocated bytes, 200 repetitions per core profile; complete outputs validated separately.",
+      "core": [
+        {
+          "name": "card",
+          "repetitions": 200,
+          "nativeTotalBytes": 240,
+          "fluidTotalBytes": 704,
+          "nativeBindingBytes": 64,
+          "nativeWriterBytes": 64,
+          "nativeOutputBufferAndStringBytes": 176,
+          "fluidWriterBytes": 464,
+          "fluidOutputBufferAndStringBytes": 240
+        },
+        {
+          "name": "list-10",
+          "repetitions": 200,
+          "nativeTotalBytes": 1984,
+          "fluidTotalBytes": 4648,
+          "nativeBindingBytes": 784,
+          "nativeWriterBytes": 784,
+          "nativeOutputBufferAndStringBytes": 1200,
+          "fluidWriterBytes": 3384,
+          "fluidOutputBufferAndStringBytes": 1264
+        },
+        {
+          "name": "list-100",
+          "repetitions": 200,
+          "nativeTotalBytes": 19264,
+          "fluidTotalBytes": 37770.52,
+          "nativeBindingBytes": 7264,
+          "nativeWriterBytes": 7264,
+          "nativeOutputBufferAndStringBytes": 12000,
+          "fluidWriterBytes": 25706.52,
+          "fluidOutputBufferAndStringBytes": 12063.999999999996
+        },
+        {
+          "name": "list-1000",
+          "repetitions": 200,
+          "nativeTotalBytes": 195664,
+          "fluidTotalBytes": 502853.8,
+          "nativeBindingBytes": 72064,
+          "nativeWriterBytes": 72064,
+          "nativeOutputBufferAndStringBytes": 123600,
+          "fluidWriterBytes": 248921.64,
+          "fluidOutputBufferAndStringBytes": 253932.15999999997
+        },
+        {
+          "name": "cart-100",
+          "repetitions": 200,
+          "nativeTotalBytes": 19072,
+          "fluidTotalBytes": 54253.04,
+          "nativeBindingBytes": 10592,
+          "nativeWriterBytes": 10592,
+          "nativeOutputBufferAndStringBytes": 8480,
+          "fluidWriterBytes": 45706.52,
+          "fluidOutputBufferAndStringBytes": 8546.520000000004
+        }
+      ],
+      "unchangedNativeBytes": true,
+      "noPeakRetainedRssOrLatencyClaim": true
+    },
+    "liveBundle": {
+      "bytes": 277237,
+      "gzip": 93207
+    },
+    "generatedGzipIncreases": {
+      "prop-button": 18,
+      "head-none": 12,
+      "head-static": 12,
+      "head-json": 14,
+      "head-script": 10
+    },
+    "sizeLimits": "Only these five ceilings increased to the exact measured correctness cost; no extra allowance. All remaining ceilings are unchanged. Generated fixtures exclude interpreter/parser/type-system modules."
+  },
+  "remainingQualification": [
+    "Arbitrary incoming Unicode pass-through names on Svelte roots without affected authored/reflected names and general CSS escape spellings remain unqualified.",
+    "Literal invocation/root attribute precedence remains an unanswered owner clarification from the previous unit. No precedence change is made here.",
+    "Native styles, accepted-child language, preparation, shared client plan consumption, actual native hydration and full real Looma behavior/hydration across targets remain unfinished.",
+    "Complete equivalent Fluid/Node latency, cold/warm throughput and allocated/retained/peak-memory qualification remain unfinished. No package publication or visibility change was performed."
+  ],
+  "sourceSha256": {
+    "CHANGELOG.md": "7d0708d76c4513b74e7226dec5693cd7dc417980b51fba873960b95a52551b8b",
+    "packages/html-next-converter/src/index.ts": "ae856d860ff840fb02e857cb86e7ebc94fdaf3711b4a296955ffdae9e412858b",
+    "packages/html-next-converter/tests/angular-public-conformance-parity.test.ts": "23155b7d3f89d5fafa5501ef5be9c6c80a32b863f8274bc80a10c5536179abdd",
+    "packages/html-next-converter/tests/converter.test.ts": "12950e4369f193540c09d09615252125ed7721d0b4fe766d30fe07a85f119702",
+    "packages/html-next-converter/tests/react-public-conformance-parity.test.ts": "374b00e9846f6aba075c55f9a1df4a243c5f5484457bbf27a198efab04f39295",
+    "packages/html-next-converter/tests/svelte-public-conformance-parity.test.ts": "a358952997051d9fe214dc12e72e0028ae3c950823e08c01416c9038b7575080",
+    "packages/html-next-converter/tests/unicode-props-parity.test.ts": "622cbb06436cf0756a2e2e3913f7aa3d5dd6fd6099ad0d1e6ea1fce4af724bf0",
+    "packages/html-next-converter/tests/vue-public-conformance-parity.test.ts": "d313a2692f9cd37497768887362a17260a79f8a0b99ce46cb974870431935262",
+    "packages/html-next-dotnet/src/HtmlNext/CompiledTemplate.cs": "745296f830d5aa1fa905391e0323cc2c6f95f9f71c8424082d669581ccbadd3f",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "f5c22ca4981f467dba32e92a478d63b607322b516db3d6448c65881694b33227",
+    "packages/html-next-dotnet/tests/fixtures/invocation-attributes.json": "a810bd732fba1b3239e88705ec50a3b3f19e697413042961edc5930445348b96",
+    "packages/html-next/scripts/measure-runtime-size.ts": "83d341f4b70bf517721d2e8e9e2de499a971702d6aebb3a1d12d6fca64231c21",
+    "packages/html-next/src/component-styles.ts": "5845666ee42d29e65f7c94074f29047777b4b8594331ec89250e237bf45bd231",
+    "packages/html-next/src/contract.ts": "ca54aa44b98651ac738e35e89698e44b1055d2bde7972cf4e5a18dfcb9d4c818",
+    "packages/html-next/src/generated/html-literal-source.ts": "ce36aff6ffbbfb1576b3e906737b12e69251f69a1401bc8e526fc09b8adaa148",
+    "packages/html-next/src/identifiers.ts": "073cd9217fff94131057e6952db3f651f63d413e59fa94154be0ee145575c191",
+    "packages/html-next/src/names.ts": "e3e4d7c610c05ce93970b9ce4214848347a3356014db1579fec547f1074c51ec",
+    "packages/html-next/src/parser.ts": "6bc1c169e0eaefb2d9f1d516c43a34d01e55e5e7f573315d0757d16b549db632",
+    "packages/html-next/src/runtime.ts": "c0e2cd82c134b9fc569932276bdd3c50ad8e359f6ee88150e4048f759dd55792",
+    "packages/html-next/src/targets/angular.ts": "1794dcf0f39480d1ea83759b4a25ff4b009aa40f1831eae59f34f4aa618fb4a2",
+    "packages/html-next/src/targets/react.ts": "3b56839675c8442ee95d37bb8dc5bf142a702796c658dc55173f8ac619888854",
+    "packages/html-next/src/targets/svelte.ts": "0a3509007cf878af193efdad1f4beff3862b2db47e6aeb453e517fffed6feb32",
+    "packages/html-next/src/targets/vanilla-blocks.ts": "37fb73060df325f025db838a6938396e6bc66cc47c57b431450adbdebb9ae3da",
+    "packages/html-next/src/targets/vue.ts": "ae95c7bb1a54d80e7d6d0fa2137db81f994c033370f445e09d3897d9ab420be1",
+    "packages/html-next/tests/component-style-contract.test.ts": "3f8db4d6b46abb61dfb2e0579f876d5767e712c8d2a14bcc4e94a756b1b95404",
+    "packages/html-next/tests/conformance/cases.ts": "ad4ef503e3d0f22090b6a802a6bf19a927d9ddc3086422972f7af1fb1b163543",
+    "packages/html-next/tests/contract.test.ts": "bc5f1e212288fe69b4e3a7ea8a3a562c3bf43a111252f5be676537bb4cb773af",
+    "packages/html-next/tests/parser.test.ts": "5673a3cea0a54ce13790446e4c204b784b2f4a474099066af90593dd553fd10a",
+    "packages/html-next/tests/targets.test.ts": "2d878e041b7ed98df16d9451558b0393962f0c86de16b432f201abe32a8bc120",
+    "vitest.targets.config.ts": "2968fdaa7c9451e60c5f4d80154ada94d8e510dc3cba435baa2a6d589cb732ea"
+  }
+}

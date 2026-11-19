@@ -1,0 +1,382 @@
+{
+  "recordedAt": "2026-11-06T19:23:18.360739+00:00",
+  "baseCommit": "3abe5e5c79503d96578516a24e3853cfdb5242ee",
+  "scope": "Native element class bindings; Node class-token parsing and generated literal-token removal. This is an incremental checkpoint within the active full renderer goal.",
+  "commands": {
+    "finalGate": {
+      "command": "CHOKIDAR_USEPOLLING=1 PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "result": "pass",
+      "includes": [
+        "verify:inner",
+        "build",
+        "test:package"
+      ],
+      "node": {
+        "passed": 1930,
+        "gatedSkips": 4637,
+        "filesPassed": 110,
+        "filesSkipped": 134,
+        "seconds": 310.77
+      },
+      "native": {
+        "passed": 656,
+        "skipped": 0,
+        "fluidCompleteOutputsValidated": 5
+      },
+      "packedConsumers": {
+        "passed": 8,
+        "seconds": 65.05
+      }
+    },
+    "focusedNode": {
+      "command": "corepack pnpm exec vitest run packages/html-next/tests/targets.test.ts packages/html-next/tests/native-class-bindings.test.ts",
+      "passed": 106
+    },
+    "browserTargets": {
+      "command": "HTMLNEXT_TARGET_TEST=1 MOZ_APP_DATA=<owned-app-data> MOZ_LOCAL_APP_DATA=<owned-local-data> corepack pnpm exec vitest run packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts --maxWorkers=1",
+      "passed": 42,
+      "targets": [
+        "live",
+        "Vanilla",
+        "React",
+        "Preact",
+        "Vue",
+        "Svelte",
+        "Angular"
+      ],
+      "builds": [
+        "development",
+        "production"
+      ],
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "scope": "Existing slot/iteration checks plus literal Unicode class-token removal and subsequent keyed updates."
+    },
+    "outputComparisons": {
+      "nativeAndNodeFixtures": 50,
+      "threeEngineComparisons": 300,
+      "nativeApis": [
+        "Render",
+        "Write"
+      ],
+      "scope": "Visible HTML and deferred carrier parsing; no native hydration claim."
+    }
+  },
+  "developmentEvidence": [
+    "Initial native class fixtures rejected unsupported class directives while Node controls passed.",
+    "A nonbreaking-space class target was rejected by Node; detached DOMTokenList probes accepted it in all three engines.",
+    "Vanilla then four generated targets failed independent literal-token removal assertions; all 42 final target scenarios passed.",
+    "The first verify:inner passed 1930 Node tests then failed check:generated on stale example output. Regenerating the shared Vue helper example restored the check."
+  ],
+  "nativeDomObservations": {
+    "toggleObservations": 30,
+    "unicodeAsciiObservations": 12,
+    "allThreeEnginesAgree": true
+  },
+  "coreAllocations": [
+    {
+      "name": "card",
+      "repetitions": 200,
+      "nativeTotalBytes": 240,
+      "fluidTotalBytes": 704,
+      "nativeBindingBytes": 64,
+      "nativeWriterBytes": 64,
+      "nativeOutputBufferAndStringBytes": 176,
+      "fluidWriterBytes": 464,
+      "fluidOutputBufferAndStringBytes": 240
+    },
+    {
+      "name": "list-10",
+      "repetitions": 200,
+      "nativeTotalBytes": 1984,
+      "fluidTotalBytes": 4648,
+      "nativeBindingBytes": 784,
+      "nativeWriterBytes": 784,
+      "nativeOutputBufferAndStringBytes": 1200,
+      "fluidWriterBytes": 3384,
+      "fluidOutputBufferAndStringBytes": 1264
+    },
+    {
+      "name": "list-100",
+      "repetitions": 200,
+      "nativeTotalBytes": 19264,
+      "fluidTotalBytes": 37770.52,
+      "nativeBindingBytes": 7264,
+      "nativeWriterBytes": 7264,
+      "nativeOutputBufferAndStringBytes": 12000,
+      "fluidWriterBytes": 25706.52,
+      "fluidOutputBufferAndStringBytes": 12063.999999999996
+    },
+    {
+      "name": "list-1000",
+      "repetitions": 200,
+      "nativeTotalBytes": 195664,
+      "fluidTotalBytes": 502853.8,
+      "nativeBindingBytes": 72064,
+      "nativeWriterBytes": 72064,
+      "nativeOutputBufferAndStringBytes": 123600,
+      "fluidWriterBytes": 248921.64,
+      "fluidOutputBufferAndStringBytes": 253932.15999999997
+    },
+    {
+      "name": "cart-100",
+      "repetitions": 200,
+      "nativeTotalBytes": 19072,
+      "fluidTotalBytes": 54253.04,
+      "nativeBindingBytes": 10592,
+      "nativeWriterBytes": 10592,
+      "nativeOutputBufferAndStringBytes": 8480,
+      "fluidWriterBytes": 45706.52,
+      "fluidOutputBufferAndStringBytes": 8546.520000000004
+    }
+  ],
+  "classCosts": {
+    "limitation": "Warmed per-thread allocations and locating timings; no confidence intervals, retained/peak/RSS or comparative speed claim.",
+    "results": [
+      {
+        "count": 100,
+        "mode": "literal",
+        "repetitions": 200,
+        "compileNs": 146479000,
+        "renderNs": 87829,
+        "renderBytes": 14288,
+        "writeNs": 74192.5,
+        "writeBytes": 8064,
+        "outputLength": 3099,
+        "sha256": "a1548047c0e6b8fbfdf5e1d67c91bc753a5255e6955cb5728a62458060ae1da4"
+      },
+      {
+        "count": 100,
+        "mode": "constant",
+        "repetitions": 200,
+        "compileNs": 4219800,
+        "renderNs": 93731,
+        "renderBytes": 14288,
+        "writeNs": 70077,
+        "writeBytes": 8064,
+        "outputLength": 3099,
+        "sha256": "a1548047c0e6b8fbfdf5e1d67c91bc753a5255e6955cb5728a62458060ae1da4"
+      },
+      {
+        "count": 100,
+        "mode": "toggle",
+        "repetitions": 200,
+        "compileNs": 769900,
+        "renderNs": 401315.5,
+        "renderBytes": 14416,
+        "writeNs": 300710.5,
+        "writeBytes": 8192,
+        "outputLength": 3099,
+        "sha256": "a1548047c0e6b8fbfdf5e1d67c91bc753a5255e6955cb5728a62458060ae1da4"
+      },
+      {
+        "count": 100,
+        "mode": "replace",
+        "repetitions": 200,
+        "compileNs": 3888000,
+        "renderNs": 308925,
+        "renderBytes": 14448,
+        "writeNs": 64353,
+        "writeBytes": 8224,
+        "outputLength": 3099,
+        "sha256": "a1548047c0e6b8fbfdf5e1d67c91bc753a5255e6955cb5728a62458060ae1da4"
+      },
+      {
+        "count": 100,
+        "mode": "concat",
+        "repetitions": 200,
+        "compileNs": 4274700,
+        "renderNs": 113782.5,
+        "renderBytes": 14448,
+        "writeNs": 66183,
+        "writeBytes": 8224,
+        "outputLength": 3099,
+        "sha256": "a1548047c0e6b8fbfdf5e1d67c91bc753a5255e6955cb5728a62458060ae1da4"
+      },
+      {
+        "count": 1000,
+        "mode": "literal",
+        "repetitions": 200,
+        "compileNs": 511500,
+        "renderNs": 228877.5,
+        "renderBytes": 143888,
+        "writeNs": 86774,
+        "writeBytes": 80064,
+        "outputLength": 31899,
+        "sha256": "53424ad5cbb4baf98521776a6b125f58dfd6e08be71327686f79391f0020ccec"
+      },
+      {
+        "count": 1000,
+        "mode": "constant",
+        "repetitions": 200,
+        "compileNs": 406900,
+        "renderNs": 132559,
+        "renderBytes": 143888,
+        "writeNs": 110984.5,
+        "writeBytes": 80064,
+        "outputLength": 31899,
+        "sha256": "53424ad5cbb4baf98521776a6b125f58dfd6e08be71327686f79391f0020ccec"
+      },
+      {
+        "count": 1000,
+        "mode": "toggle",
+        "repetitions": 200,
+        "compileNs": 468300,
+        "renderNs": 329776.5,
+        "renderBytes": 144016,
+        "writeNs": 192260,
+        "writeBytes": 80192,
+        "outputLength": 31899,
+        "sha256": "53424ad5cbb4baf98521776a6b125f58dfd6e08be71327686f79391f0020ccec"
+      },
+      {
+        "count": 1000,
+        "mode": "replace",
+        "repetitions": 200,
+        "compileNs": 652600,
+        "renderNs": 437827.5,
+        "renderBytes": 144048,
+        "writeNs": 225911,
+        "writeBytes": 80224,
+        "outputLength": 31899,
+        "sha256": "53424ad5cbb4baf98521776a6b125f58dfd6e08be71327686f79391f0020ccec"
+      },
+      {
+        "count": 1000,
+        "mode": "concat",
+        "repetitions": 200,
+        "compileNs": 500800,
+        "renderNs": 358532,
+        "renderBytes": 144048,
+        "writeNs": 218790,
+        "writeBytes": 80224,
+        "outputLength": 31899,
+        "sha256": "53424ad5cbb4baf98521776a6b125f58dfd6e08be71327686f79391f0020ccec"
+      }
+    ]
+  },
+  "catalog": {
+    "revision": "915afd2e8fafdba86887ea4eefd3b3534c20de5a",
+    "entries": 111,
+    "before": 57,
+    "after": 63,
+    "changes": [
+      {
+        "file": "packages/looma/src/components/ui-combobox/ui-combobox.html",
+        "before": "'class:sr-only' is not implemented in the measured rendering slice.",
+        "after": "'style:--_max-rows' is not implemented in the measured rendering slice.",
+        "pass": false
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-code-language/ui-editor-code-language.html",
+        "before": "'class:sr-only' is not implemented in the measured rendering slice.",
+        "after": "'style:--_max-rows' is not implemented in the measured rendering slice.",
+        "pass": false
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-mention-menu/ui-editor-mention-menu.html",
+        "before": "'class:active' is not implemented in the measured rendering slice.",
+        "after": "compile",
+        "pass": true
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-slash-menu/ui-editor-slash-menu.html",
+        "before": "'class:active' is not implemented in the measured rendering slice.",
+        "after": "compile",
+        "pass": true
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-table-context-menu/ui-editor-table-context-menu.html",
+        "before": "'class:selected' is not implemented in the measured rendering slice.",
+        "after": "'style:--_swatch' is not implemented in the measured rendering slice.",
+        "pass": false
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-table-overlay/ui-editor-table-overlay.html",
+        "before": "'class:active' is not implemented in the measured rendering slice.",
+        "after": "'style:top' is not implemented in the measured rendering slice.",
+        "pass": false
+      },
+      {
+        "file": "packages/looma/src/components/ui-editor-table-toolbar/ui-editor-table-toolbar.html",
+        "before": "'class:active' is not implemented in the measured rendering slice.",
+        "after": "'style:--_swatch' is not implemented in the measured rendering slice.",
+        "pass": false
+      },
+      {
+        "file": "packages/looma/src/components/ui-radio-group/ui-radio-group.html",
+        "before": "'class:sr-only' is not implemented in the measured rendering slice.",
+        "after": "compile",
+        "pass": true
+      },
+      {
+        "file": "packages/looma/src/components/ui-segmented-control/ui-segmented-control.html",
+        "before": "'class:sr-only' is not implemented in the measured rendering slice.",
+        "after": "compile",
+        "pass": true
+      },
+      {
+        "file": "packages/looma/src/components/ui-toast-region/ui-toast-region.html",
+        "before": "'class:closing' is not implemented in the measured rendering slice.",
+        "after": "compile",
+        "pass": true
+      },
+      {
+        "file": "packages/looma/src/components/ui-top-bar/ui-top-bar.html",
+        "before": "'class:scroll-title' is not implemented in the measured rendering slice.",
+        "after": "compile",
+        "pass": true
+      }
+    ],
+    "limitation": "Compile-only with captured stylesheet assets; no catalog render/behavior/hydration claim."
+  },
+  "runtimeSize": {
+    "liveBytes": 277264,
+    "liveGzipBytes": 93155,
+    "allExistingTargetsMet": true,
+    "thresholdsChanged": false
+  },
+  "review": {
+    "skill": "ce-code-review",
+    "result": "complete",
+    "scope": "Current class-binding checkpoint",
+    "execution": "One bounded inline pass under owner single-agent and cross-model-off instructions",
+    "independentReview": false,
+    "blockingFindings": 0,
+    "generatedOutput": "Regenerated shared Vue helper matches compiler output; reproducibility check passes."
+  },
+  "remainingGoalWork": [
+    "Framework from:class/keyed order and update qualification, including current Vue duplicate-attribute compile failures.",
+    "Invocation forwarding, style bindings and remaining native language/preparation features.",
+    "Complete real Looma catalog rendering/behavior and interoperable native hydration.",
+    "Complete comparative speed, retained/peak/RSS memory and protected release-readiness qualification.",
+    "Audit long dynamic class strings: current allocation-free prefix de-duplication has quadratic worst-case time."
+  ],
+  "releaseState": "Packages remain private. No package publication or visibility change authorized.",
+  "sourceSha256": {
+    "CHANGELOG.md": "43a3bdb6038e98da924e798180327ebfcb9b8e572cb2761bb765000e484857cf",
+    "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts": "5e0ab2dfd0f6b25aff13af33c3a9e9bd3abec92f10c9b9a6669b54d33eb3fadc",
+    "packages/html-next-dotnet/README.md": "715406cc0abe03c052f18a5d542d6f90255b5af93534129d00723d448130acdb",
+    "packages/html-next-dotnet/src/HtmlNext/BoundAttribute.cs": "b9b28e6e1e2cd3c9a531a7d85a54386651dc5c41abd868b52b0d1e8fbbb90d5f",
+    "packages/html-next-dotnet/src/HtmlNext/ClassBinding.cs": "2606870fce201f4d8753f5ba08ae46d2bc0fb2549bf64a8052d467c90ac08e5e",
+    "packages/html-next-dotnet/src/HtmlNext/Expressions.cs": "63ecab29eae7e6cfea796151c115536930bed08fb97e14b4dafd3be9ad13fa56",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "d00fb7eb35d03ec68217d577801c021625d4e3e1a3450b8ce3a2a5f286bd7755",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/ClassBindingTests.cs": "80de8051640574af387a5d31ddb8923b575e533208af2c910067b438a7db4db1",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/HtmlNext.Tests.csproj": "48e79107af3bd23bf84b82f908df4db40c8458944e510deb91b2e11efac56f76",
+    "packages/html-next-dotnet/tests/fixtures/class-bindings.json": "a984db649fd1f681184945d9d1c578206d87b3bd4ee7811b319557abc22305d2",
+    "packages/html-next/examples/generated/vue/host.ts": "419a624e0dd210a51ed53236bdc88fe0b1dec18cbcbd5180e6beb8c0f808a8cf",
+    "packages/html-next/src/parser.ts": "b3f129bcc7271eb1e26c4e18c5c976e82f91424a1df346f5b83a5a4f34d42b3c",
+    "packages/html-next/src/targets/angular.ts": "d43b7eb9c89fb0a2c9d19d4938be3b3dc46ea02006eed19fd084f24cb9a034d3",
+    "packages/html-next/src/targets/class-text.ts": "47247106a6e660929db1fdea93bb2e72f29ea974fadbdd57a0d9c145190c59d5",
+    "packages/html-next/src/targets/react.ts": "a207fc35ad123eb98c4cdd155646986a278d794a0cecb7fda2c30983829fd087",
+    "packages/html-next/src/targets/svelte-decorations.ts": "234fc859edd181fc22f46abab69f493a272bff7ff442590362dfd46c343960fa",
+    "packages/html-next/src/targets/vanilla-blocks.ts": "4d6ab26defdfd7a661135d79072fd91ed29411701c02301448d07643ed664e36",
+    "packages/html-next/src/targets/vue-lowering.ts": "9f483b7528e52c49b08ecb6b7bb9832781608c208aaf232509034efa03cd7242",
+    "packages/html-next/src/targets/vue.ts": "1ec7ffef5596350fe39fb10ee2800ba28a3bb2d213add1b4f5c6794d6e4c1511",
+    "packages/html-next/tests/native-class-bindings.test.ts": "259e8bfd9ab306102c9497b0465e156c8418fe72958ce296cef3fa14d106d8de",
+    "packages/html-next/tests/targets.test.ts": "23f5fd86d660fa2615dc1a3daf2a93b57b6e3c55cd1d7e47769bd2f1dfb91a00"
+  }
+}

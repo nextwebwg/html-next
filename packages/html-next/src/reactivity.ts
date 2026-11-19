@@ -1,6 +1,5 @@
 import { isPlatformObject } from "./freeze.js";
 import { NONCONFORMING, type Scope, type Value } from "./expression.js";
-import type { TypeNode } from "./type-system.js";
 import { fail } from "./diagnostics.js";
 import { copyStateSeed, evaluateInput, observeInputStatus, observingInputs, publicInputStatus, sameInputStatus, READY_INPUT, UNRESOLVED_INPUT, type InputStatus } from "./inputs.js";
 
@@ -617,7 +616,7 @@ export class ReactiveScope implements Scope {
   readonly #inputStatuses = new Map<string, ReactiveSignal<InputStatus | undefined>>();
   #stateInitializers?: Map<string, { initialized: boolean; claim?: () => void; commit?: (value: Value) => void }>;
   typeOfPath?: Scope["typeOfPath"];
-  typeOfDeclaredPath?: ((path: string) => TypeNode | undefined) | undefined;
+  typeOfDeclaredPath?: Scope["typeOfDeclaredPath"];
   #cachedName: string | undefined;
   #cachedCell: ReactiveCell | undefined;
 

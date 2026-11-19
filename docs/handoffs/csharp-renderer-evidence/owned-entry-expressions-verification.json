@@ -1,0 +1,720 @@
+{
+  "checkpoint": "Owned accepted-child entry expressions, based on e805055d",
+  "branch": "matthew-dean/c-renderer-handoff-goal",
+  "releaseVersion": "1.0.0-alpha.92",
+  "proposal": {
+    "repository": "nextwebwg/specs",
+    "commit": "ee83bc361313d3f2a30868bd890a606ac298091d",
+    "path": "html-next/components.md"
+  },
+  "behavior": [
+    "Indexing, computed and structural aliases preserve owned entry identity; lexical shadowing does not replace the owning list.",
+    "Conditional/default expressions and new containers can select entries from several own lists. Slot-prop conversion covers all candidate tags.",
+    "Null and absent entries render fallback. Compatible copied records and foreign branches do not acquire ownership.",
+    "Angular computed values retain references, Vue slot props use an allocated object alias, and compiled Vanilla carries logical invocation slot routing independently of root attributes."
+  ],
+  "verification": {
+    "repositoryGate": {
+      "command": "PATH=/Users/matthew/.dotnet:$PATH corepack pnpm verify:pr",
+      "exitCode": 0,
+      "javascriptPassed": 2074,
+      "javascriptGatedSkips": 4910,
+      "javascriptSeconds": 311.64,
+      "nativePassed": 844,
+      "nativeSkipped": 0,
+      "fluidCompleteOutputComparisons": 5,
+      "packedConsumersPassed": 8,
+      "packedConsumerSeconds": 62.77
+    },
+    "focusedParserAndServer": {
+      "command": "corepack pnpm exec vitest run packages/html-next/tests/owned-entry-expressions.test.ts packages/html-next/tests/parser.test.ts",
+      "passed": 104
+    },
+    "allTargets": {
+      "command": "corepack pnpm exec vitest run --config vitest.targets.config.ts packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts --maxWorkers=1",
+      "targets": [
+        "live",
+        "vanilla",
+        "vue",
+        "react",
+        "preact",
+        "svelte",
+        "angular"
+      ],
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "modes": [
+        "development",
+        "production"
+      ],
+      "passed": 42,
+      "failed": 0
+    },
+    "nodeHydration": {
+      "command": "corepack pnpm exec vitest run --config vitest.browser.config.ts packages/html-next/tests/columns-browser.test.ts --testNamePattern \"preserves owned entry expressions\" --maxWorkers=1",
+      "passed": 6,
+      "gatedOrFilteredSkips": 33,
+      "engines": [
+        "Chromium",
+        "Firefox",
+        "WebKit"
+      ],
+      "modes": [
+        "fresh",
+        "hydrated"
+      ],
+      "assertions": [
+        "manual initial/changed values",
+        "switch between two lists and back",
+        "hydrated outlet element identity",
+        "no warnings or errors"
+      ]
+    },
+    "firefoxHost": {
+      "platform": "Linux arm64 Docker",
+      "image": "mcr.microsoft.com/playwright@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f",
+      "playwright": "1.64.0",
+      "reason": "Local macOS Firefox failed to launch; same assertions ran through the existing remote-browser hook. Owned containers stopped and removed."
+    },
+    "sourceQualification": "The final single-source temporary-array removal was made during the broad gate and separately checked with all 104 focused tests, all 42 target cases, all six fresh/hydrated cases, final lint and the packed-consumer build. Native provenance correction and new tests preceded their corresponding gate stages.",
+    "redBeforeFix": {
+      "nodeFailures": 11,
+      "nodeControls": 1,
+      "nativeValidExpressionFailures": 5,
+      "nativeValidExpressionControls": 8,
+      "nativeListCopyCounterexample": "The review regression initially compiled a conditional copied list without throwing, then passed after common item provenance was cleared."
+    },
+    "review": {
+      "mode": "one bounded inline source and simplification pass",
+      "independentReviewers": 0,
+      "findingsApplied": [
+        "Clear provenance recursively when a conditional list can contain a copied record.",
+        "Avoid a temporary array on existing single-source live outlet updates."
+      ],
+      "remainingScope": "This unit only; whole-goal review remains pending."
+    }
+  },
+  "memory": {
+    "scope": "73 existing native reference/projection/deferred cases. Full expected output and Render/Write equality validated before 1000 warmups and 1000 measured iterations. Warmed per-thread allocation only.",
+    "baseline": "e805055d receipt accepted-child-lists-verification.json",
+    "caseCount": 73,
+    "allOutputHashesAndRenderWriteAllocationCountsEqual": true,
+    "cases": [
+      {
+        "fixture": "element-references.json",
+        "name": "root",
+        "length": 16,
+        "sha256": "93f6d258b6cbac5f19cf3cbb8a6b094d654de2282a8cfefb3ce48fa109906d63",
+        "renderBytes": 80,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "child",
+        "length": 30,
+        "sha256": "22387a438ee1172c12d8b40127b042f0c142780a77b4d0e80cac298b65703499",
+        "renderBytes": 112,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "repeated",
+        "length": 29,
+        "sha256": "f572238265b72ad5abc67822be3369c4fa14e68c16b0d00da02b04e26affe7f5",
+        "renderBytes": 112,
+        "writeBytes": 32
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "filtered",
+        "length": 19,
+        "sha256": "55be7e9a051ab0cf92e1a8cf45a9999dd7e89b13a21b1da05d97687539ec1e8e",
+        "renderBytes": 96,
+        "writeBytes": 32
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "hidden",
+        "length": 13,
+        "sha256": "4cff6d6aa4040c3d97d4ad5de83c3b9e78d400768a069871ebaf95d3ee52ce1f",
+        "renderBytes": 72,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "root-match",
+        "length": 12,
+        "sha256": "91d23d85625bc3f4a2dbbdb9a8f97d5ffeef4f2208f8667ec3bf8b1311995ba7",
+        "renderBytes": 72,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "root-match-descendants",
+        "length": 27,
+        "sha256": "6e21543905bec63b4d780443d7cb2f2bba9e8630a1b83bbf7a393b088dcedf68",
+        "renderBytes": 104,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "hyphenated-name",
+        "length": 25,
+        "sha256": "bc84a0e5cb4fd7075df1eaf12c1ddf2769cbb10301d485eba812a76dc6a95041",
+        "renderBytes": 96,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "case-sensitive-names",
+        "length": 25,
+        "sha256": "bc84a0e5cb4fd7075df1eaf12c1ddf2769cbb10301d485eba812a76dc6a95041",
+        "renderBytes": 96,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "dollar-underscore-name",
+        "length": 25,
+        "sha256": "bc84a0e5cb4fd7075df1eaf12c1ddf2769cbb10301d485eba812a76dc6a95041",
+        "renderBytes": 96,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "definition-owned-names",
+        "length": 25,
+        "sha256": "3ac20d5c46d4aa637ea320833274a35d7d4178843b5feb8a5940e6ceae887a2b",
+        "renderBytes": 288,
+        "writeBytes": 128
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "component-invocation",
+        "length": 25,
+        "sha256": "3ac20d5c46d4aa637ea320833274a35d7d4178843b5feb8a5940e6ceae887a2b",
+        "renderBytes": 288,
+        "writeBytes": 128
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "delegated-root",
+        "length": 12,
+        "sha256": "34ae23e71810bf9f4ba8c4d2a1c3f9aa0f8a2c952f66fcc3ffbcb0e9336bfa23",
+        "renderBytes": 264,
+        "writeBytes": 128
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "wrapper",
+        "length": 25,
+        "sha256": "38c6954010d49e605a02c293b1018d8bed4d16ed26c5ef9821711e1912537770",
+        "renderBytes": 96,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "svg",
+        "length": 46,
+        "sha256": "7d6060b627b8fa157764d487887a62a4329270231c9bba67612988d7f4693f2d",
+        "renderBytes": 144,
+        "writeBytes": 24
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "lazy-body",
+        "length": 168,
+        "sha256": "db10f27324a019307f4badc315e1972648216cc7d4f9f9dd086a5214152a0222",
+        "renderBytes": 816,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "unused-lazy-body",
+        "length": 123,
+        "sha256": "14142e55d6ab437e8fee90344a7258e87249ca88884679a956069e6367276226",
+        "renderBytes": 728,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "unplaced-component",
+        "length": 89,
+        "sha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876",
+        "renderBytes": 656,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "lazy-carrier-reference",
+        "length": 168,
+        "sha256": "db10f27324a019307f4badc315e1972648216cc7d4f9f9dd086a5214152a0222",
+        "renderBytes": 816,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "element-references.json",
+        "name": "unplaced-nested-references",
+        "length": 160,
+        "sha256": "e0bd62e5b5ce80a10414e6f6befc1a2ce81a853da11f0c8c870131732bcb87ea",
+        "renderBytes": 800,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "empty-fallbacks",
+        "length": 150,
+        "sha256": "b6cdbc9fb2f006bb8a03329889ed89ae939d84b288d60a5009ca400709740697",
+        "renderBytes": 544,
+        "writeBytes": 128
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "default-text",
+        "length": 137,
+        "sha256": "28db8e3b8f93b2b6da9496723d461966cc4e45340a12888d1854abefddde5db1",
+        "renderBytes": 752,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "named-and-default",
+        "length": 153,
+        "sha256": "00312db7ecc7b4d691ce165d8a2a26d1486ae416e946d5115ba6ddda5871ca8c",
+        "renderBytes": 784,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "false-assignment",
+        "length": 150,
+        "sha256": "b6cdbc9fb2f006bb8a03329889ed89ae939d84b288d60a5009ca400709740697",
+        "renderBytes": 784,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "true-assignment",
+        "length": 159,
+        "sha256": "e925375aa328b2223f69bcb7840191d0f1d41d677639f344c9fa231665c66b67",
+        "renderBytes": 800,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "empty-iteration",
+        "length": 150,
+        "sha256": "b6cdbc9fb2f006bb8a03329889ed89ae939d84b288d60a5009ca400709740697",
+        "renderBytes": 792,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "filtered-iteration",
+        "length": 149,
+        "sha256": "0a9f91262392f410ddd5cb239877e18fce6e5c6e7138c22ed800d100d644999f",
+        "renderBytes": 784,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "empty-text-node",
+        "length": 133,
+        "sha256": "425b89ca1e1807b317674155a5a15bbb9596f4da06ebc3083291ae921737a591",
+        "renderBytes": 752,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "consumer-scope",
+        "length": 146,
+        "sha256": "9696677f7ef2b440af7cf33e99e6290ba3d081572f83cfa42d77f30098ed24d9",
+        "renderBytes": 784,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "lazy-template",
+        "length": 275,
+        "sha256": "48691f2c24388e98d0f985b6d0ff8117206721b2ef416cd4b38f65f3bedf8221",
+        "renderBytes": 1032,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "first-template",
+        "length": 289,
+        "sha256": "6c9c7dfa0a8193b0209e668166f97acee549e12202752160cba629acfa8e56e2",
+        "renderBytes": 1056,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "empty-template",
+        "length": 196,
+        "sha256": "2bc5ad41a3c800a8675a55cf6710989ace4cf1473d683a8c8f7fb084e0699c3d",
+        "renderBytes": 872,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "comment-projection",
+        "length": 150,
+        "sha256": "b6cdbc9fb2f006bb8a03329889ed89ae939d84b288d60a5009ca400709740697",
+        "renderBytes": 544,
+        "writeBytes": 128
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "fragment-value",
+        "length": 58,
+        "sha256": "fa0074a06745530b2441affb57c89850cefbe3c0de5adb213efabd1824d0aac5",
+        "renderBytes": 600,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "fragment-with",
+        "length": 66,
+        "sha256": "90829d3acde179512e3dae55188a4cd0674511fa0ffc8df9720d0d15917bf9e6",
+        "renderBytes": 624,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "fragment-match",
+        "length": 64,
+        "sha256": "65e1b103a43b56941df8745ad192a1316c195786e0d4ccb74e5e6c61e59ffe85",
+        "renderBytes": 608,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "fragment-match-empty",
+        "length": 74,
+        "sha256": "0ee5952badb383abdcff7380da31eea3658e3c34e106024f5c6f499516bd5db3",
+        "renderBytes": 632,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "parser-safe-outlet",
+        "length": 65,
+        "sha256": "9b2dcf0df4beabedbcc8975bb9fc9013b065c21a0e2ea5d789fb09b5467c62b0",
+        "renderBytes": 608,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "layout-only",
+        "length": 74,
+        "sha256": "0ee5952badb383abdcff7380da31eea3658e3c34e106024f5c6f499516bd5db3",
+        "renderBytes": 392,
+        "writeBytes": 128
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "between-defaults",
+        "length": 73,
+        "sha256": "82d5359ae88be8aa7ce865d948e20c3d1ddaec5cef12d53b9a97271bc19ec304",
+        "renderBytes": 624,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "nonbreaking-space",
+        "length": 55,
+        "sha256": "b7b4d46341e799f755799151a423b92c08c6072767ae7766b8f4ca887df1d026",
+        "renderBytes": 592,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "comment-split-text",
+        "length": 59,
+        "sha256": "09dd45beef843247978294c45cf4d42defc6383685c1109703a1a2945675a57a",
+        "renderBytes": 600,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "slot-rendering.json",
+        "name": "beside-named",
+        "length": 131,
+        "sha256": "11a0da4b97b7a4ca6faca318842cce32f174033344b3cf40640d882f3f3fd4b5",
+        "renderBytes": 744,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "static-prop",
+        "length": 103,
+        "sha256": "558418cda01bec72d55b308f1026d11cd1d181760596c5107eb7794842346252",
+        "renderBytes": 696,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "bound-prop",
+        "length": 103,
+        "sha256": "9113ed4139bb50ec0861c873233a30a6ebe10a582a2bbd295aa999dd2474d8b8",
+        "renderBytes": 696,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "native-bound-text",
+        "length": 101,
+        "sha256": "6bb14eabed8a2b3487c2c48d07c4cfafef191044f0f2cbff4577670e59ce0740",
+        "renderBytes": 688,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "native-bound-attribute",
+        "length": 115,
+        "sha256": "2f080daa208ee1b31a5ca334fde9ec17bd581859ccbe13425737130e7e9dc12d",
+        "renderBytes": 720,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "conditional",
+        "length": 89,
+        "sha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876",
+        "renderBytes": 664,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "loop",
+        "length": 105,
+        "sha256": "fc9566f56b3f687bf6b608e6c032e706ee0f3f8562a319b3a2bd58abd34abef5",
+        "renderBytes": 704,
+        "writeBytes": 296
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "fragment",
+        "length": 101,
+        "sha256": "e34e7505bbbfe7212f83d9ad8e3e8d1f76c4a5f9c1fee5c95d5321043e54d754",
+        "renderBytes": 688,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "lazy",
+        "length": 158,
+        "sha256": "47e8124bc8c28a91014c6651c889097ed1297d34ec318106f944d0c06d7181a3",
+        "renderBytes": 808,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "forwarding",
+        "length": 140,
+        "sha256": "9ad8b4b3cd80f5e549fbfea6cfddae152e2c011ebcb1d204be18e7ae7cfaee34",
+        "renderBytes": 768,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "nested-component",
+        "length": 120,
+        "sha256": "ea60117ded0adf4b1ff35e80ced0ffec5b605fd29b5a2eee1ee1e77da63f4724",
+        "renderBytes": 728,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "null-input",
+        "length": 89,
+        "sha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876",
+        "renderBytes": 656,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "absent-input",
+        "length": 89,
+        "sha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876",
+        "renderBytes": 736,
+        "writeBytes": 360
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "invalid-numeric-input",
+        "length": 89,
+        "sha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876",
+        "renderBytes": 656,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "wrong-unknown-input",
+        "length": 89,
+        "sha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876",
+        "renderBytes": 664,
+        "writeBytes": 288
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "valid-unknown-input",
+        "length": 99,
+        "sha256": "ae0d32b93ed85926df5fc9fe72da4f3d13d4e17b62363849c24ee71100afca95",
+        "renderBytes": 816,
+        "writeBytes": 416
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "list-input",
+        "length": 101,
+        "sha256": "88874341eed4dbc27724da91a2d58be39f2ae334cb6fd9b324991048d6793fd9",
+        "renderBytes": 728,
+        "writeBytes": 328
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "object-input",
+        "length": 89,
+        "sha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876",
+        "renderBytes": 696,
+        "writeBytes": 320
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "boolean-false",
+        "length": 89,
+        "sha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876",
+        "renderBytes": 656,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "boolean-true",
+        "length": 98,
+        "sha256": "2bf0e19f098726bb0eb207ae2e421b4a34a75c154f91bf343aa4434a392db9fc",
+        "renderBytes": 680,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "written-spelling",
+        "length": 100,
+        "sha256": "45446d86ff9e890627b04e2195685f6ae24fa2e284cb5ae96ba0a8c87037245b",
+        "renderBytes": 680,
+        "writeBytes": 280
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "pending-state",
+        "length": 99,
+        "sha256": "a5fbf6b71490a1f7f42417b89e609df778d455fc3d64c81431272bc608e40547",
+        "renderBytes": 880,
+        "writeBytes": 480
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "pending-computed",
+        "length": 99,
+        "sha256": "a5fbf6b71490a1f7f42417b89e609df778d455fc3d64c81431272bc608e40547",
+        "renderBytes": 880,
+        "writeBytes": 480
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "pending-fallback",
+        "length": 99,
+        "sha256": "c1be707ac4da0b477b0ce60e996f5ffa095b581d6468b440fdefb789b438b0a3",
+        "renderBytes": 880,
+        "writeBytes": 480
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "pending-unread-branch",
+        "length": 99,
+        "sha256": "c1be707ac4da0b477b0ce60e996f5ffa095b581d6468b440fdefb789b438b0a3",
+        "renderBytes": 880,
+        "writeBytes": 480
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "available-missing-field",
+        "length": 89,
+        "sha256": "5d1d2bc99e889813be7e8acef6e59e07c0a69d8124b2be3449e6ac3af96d6876",
+        "renderBytes": 856,
+        "writeBytes": 480
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "pending-name-shadowed-by-alias",
+        "length": 99,
+        "sha256": "ae0d32b93ed85926df5fc9fe72da4f3d13d4e17b62363849c24ee71100afca95",
+        "renderBytes": 936,
+        "writeBytes": 512
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "pending-binding-followed-by-ready-binding",
+        "length": 109,
+        "sha256": "7f13a8563d02e11290a1b91fc9bdec50191d9e8478cb2b373d0e7267f21c1b38",
+        "renderBytes": 896,
+        "writeBytes": 480
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "typed-row-props",
+        "length": 143,
+        "sha256": "4239fbe6b496ad8ea4c17fc8ee6a0089079d92d9a7d48a04db7824b24da74152",
+        "renderBytes": 1648,
+        "writeBytes": 1040
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "forwarded-deferred-before-literal",
+        "length": 121,
+        "sha256": "65824a905a54a1dfc09462058fea9aafa5b1a2fa9d02be462a6fbac55e220af6",
+        "renderBytes": 1352,
+        "writeBytes": 912
+      },
+      {
+        "fixture": "deferred-components.json",
+        "name": "forwarded-deferred-after-literal",
+        "length": 119,
+        "sha256": "5bf082fb72b9ae28f0431e71a4dee7657603c034b6bccbb16613df7da4e84575",
+        "renderBytes": 1352,
+        "writeBytes": 912
+      }
+    ],
+    "limitations": "No new accepted-list workload, latency, retained, peak or RSS claim."
+  },
+  "remainingGoal": "Shared own/borrowed plain-content ownership and accepted presets in JavaScript targets; complete native preparation/client records/hydration, full real Looma qualification and the remaining performance/release-readiness work are unfinished.",
+  "sourceHashes": {
+    "CHANGELOG.md": "e034729b5edcef85aa511911586415ca3de6ae5809d993d84318e40e42cd8b82",
+    "packages/html-next-converter/tests/slot-prop-conformance-parity.test.ts": "dda29c807a090c2607326a577f9d28f98f4fa3b028bd1e0eee6152377d0bdf66",
+    "packages/html-next-dotnet/README.md": "546d40b7ba1f2078d4c4933faf3c93b8019d6b73af4e6cd6be3e388ef345cdbe",
+    "packages/html-next-dotnet/src/HtmlNext/BorrowedSlots.cs": "1e38f4695cb9c369c8995c9e72af5f5ae7da354ffce2941efd75b81c53385113",
+    "packages/html-next-dotnet/src/HtmlNext/ExpressionCompiler.cs": "ef7bf60d39e50af51e6865d92f0b0b3a5e8d1a8fbea2ef73d9d622f3b8721a89",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "27286c3cb72f4d05b8be4f09c573356d85ffa2462d5cce1f7319e7b6e841138f",
+    "packages/html-next-dotnet/src/HtmlNext/ValueType.cs": "7b4a9f2730c0714d018e118712668fb9942ba0f304d4d097ef402519f36f410d",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/AcceptedChildListTests.cs": "80ad95cad2b41631b1b1955f0e60eee580d3feae67f86946dc75401f1bb3c10c",
+    "packages/html-next/scripts/live-runtime-inventory.ts": "b13e3e33cf29c914021cbc7b4f7dd2d38ded0dde455f73ec82279be194d22bbf",
+    "packages/html-next/src/entry-origin.ts": "a9f26358b4ed1c34eee4b3cdc3fcc944266dfda5c3cb4763db9788bff28f3b2b",
+    "packages/html-next/src/generated-runtime.ts": "1b4f77db22f6189a382b99e545cf2c9a8ebee7e940d75893ac9f6804ef12092a",
+    "packages/html-next/src/parser.ts": "bc267e53b85b34033a9524629774aac89c29854a8b436e444e5a5375293cc80b",
+    "packages/html-next/src/runtime.ts": "e12f7145d8e7789d248fe5579060ff51c45a172bb9522c1facaee932b9e8312b",
+    "packages/html-next/src/targets/angular.ts": "85cf1ff863bf2ef68f5d83a224ff515c5331e6996ceb341c26cf8fe5c9eb8fb3",
+    "packages/html-next/src/targets/react.ts": "3ac554293112a412c24022e34cff6bafb9c41d48e83311696eec546c9dafb385",
+    "packages/html-next/src/targets/svelte.ts": "6239085bf00ce0e12f2bf11403083f4809ca3dcd8cfb8fe546f2e3a775268892",
+    "packages/html-next/src/targets/vanilla-blocks.ts": "3538560bec3e7ae6235b5e64b4ad3e87fb36d455ef895d280c88b81d58e0de93",
+    "packages/html-next/src/targets/vue.ts": "be621f3aa51484ba4479b78e6b7e96bda6a129a6f8fe6d76d95b41b738575aea",
+    "packages/html-next/src/template.ts": "ad941a2c1312fba22a1e6cfd4747a42754e21c2ac37722c8233e64aaae5cbc5e",
+    "packages/html-next/tests/columns-browser.test.ts": "e75fad2b9f3944a3668dab389485761a9009bdbc2b0623cf85c351a2d1cd1dc6",
+    "packages/html-next/tests/fixtures/owned-entry-expressions.ts": "03913a50adc1dad51e3aed5958c0f370bd7b3b4d5d2d99a36a5f160ce0a29dde",
+    "packages/html-next/tests/owned-entry-expressions.test.ts": "22a50e07cb7001725100d5e2068188a3f29078137cd2d885296435791af2dba4",
+    "packages/html-next/tests/parser.test.ts": "df52d39ed87fe5f4a9068ffadb54798f1efce89bc4fd7f5ed3dc2581685c4f52",
+    "packages/html-next/tests/targets.test.ts": "ffc3e2a7bff276bae07ac752756f88ba0404c7609fe587e4ded25495ed6cf631"
+  }
+}

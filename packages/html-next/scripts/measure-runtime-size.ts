@@ -109,7 +109,7 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
     parserModules: inputs.filter((path) =>
       path.endsWith("/src/parser.ts") || path.endsWith("/src/source-parser.ts")
     ).length,
-    forbiddenModules: inputs.filter((path) => forbiddenModule.test(path)),
+    forbiddenModules: inputs.filter((path) => forbiddenModule.test(path) || path.endsWith("/src/dom-attributes.ts")),
     targetGzip,
     targetMet: measured.gzip <= targetGzip,
   };
@@ -154,14 +154,24 @@ async function generatedFixture(name: string, targetGzip: number): Promise<Gener
 // so that component's styles follow its markup into another component's slot.
 // Canonical component output and legacy identity reads add 0–149 B gzip to these fixtures.
 // The lifecycle query uses registered records; no interpreter or parser is added.
-const staticGenerated = await generatedFixture("static-card", 8_068);
+// Namespace-aware prototype attribute keys cost 17-22 B gzip on these HTML-only fixtures.
+// Exact current measurements below include that branch; namespace writers and URI tables stay absent.
+// Shared projection rejection and fallback ownership cost 18–29 B gzip on four fixtures.
+// Rejection storage is lazy; ordinary components do not create child-list entries.
+// Automatic first-position attribute forwarding adds its compiled input channel to each root.
+// Limits below record the measured gzip-9 output with that behavior, without extra allowance.
+const staticGenerated = await generatedFixture("static-card", 8_580);
 // The counters' `number` arithmetic bundles its decimal operations (src/decimal.ts): `$count + 1`
 // imports `add` (+256 B gzip) and the computed counter's `$count * 2` adds `multiply` (+294 B in all).
 // +5 B: the minifier names this bundle's identifiers differently beside the generated runtime's head exports,
 // which the bundle does not include.
 // +1 B gzip after caller-input adoption reuse: the fixture has identical module contributions and
 // uncompressed size; only minified local identifiers change. The adoption helper is tree-shaken.
-const reactiveGenerated = await generatedFixture("reactive-counter", 7_849);
+// Closed event validation is shared with minified framework compilers. Its one-time factory
+// costs +1/+17/+4/+8 B gzip on static/reactive/prop/computed fixtures; limits record
+// those measured totals, with no extra allowance. The cached brand-check hot path is unchanged.
+// Typed text ordering adds33B gzip to this arithmetic helper bundle.
+const reactiveGenerated = await generatedFixture("reactive-counter", 8_367);
 // +1.0–1.1 KB on prop fixtures: the typed input SDK, accepted caller ownership, and status-only
 // publication use compiled prop checks and the existing scheduler. Components without props
 // do not import the SDK. The dedicated await fixture protects actual status/error lowering.
@@ -183,41 +193,52 @@ const reactiveGenerated = await generatedFixture("reactive-counter", 7_849);
 // Native custom validity keeps application-owned errors across prop refreshes; identical attribute
 // writes are omitted to preserve opaque native editing state (+19–34 B on affected prop/head
 // fixtures, +3 B on controller-keyed). These are exact measured costs, with no added allowance.
-const propGenerated = await generatedFixture("prop-button", 14_238);
-const awaitGenerated = await generatedFixture("await-card", 14_666);
+// ASCII-only attribute folding preserves Unicode prop names: +18 B gzip here, +10–14 B in the head fixtures.
+const propGenerated = await generatedFixture("prop-button", 14_567);
+// Lexical declared-reference checks add 168 B for await status/error aliases and 138 B for
+// seeded-state availability/error aliases. Ratchet to their measured cost without extra allowance.
+// +3 B from minifier allocation after moving live reference checks into expression evaluation;
+// the compiled fixture still contains no interpreter, parser or type-system modules.
+const awaitGenerated = await generatedFixture("await-card", 15_209);
 // +55 B gzip: the seed-copy cold path recognizes ordinary foreign-realm records,
 // retaining local/foreign class and platform identities. Local record/list copies keep their fast path.
-const seededGenerated = await generatedFixture("state-seed", 16_168);
+const seededGenerated = await generatedFixture("state-seed", 16_486);
 // A component with computeds also bundles the read-only view live's host gives them (nested writes refused).
 // Isolating transfer sentinels from expression evaluation changes minifier allocation by 1–2 B.
-const computedGenerated = await generatedFixture("computed-counter", 8_547);
+// +5 B gzip: finite arithmetic checks and invalid-result retention in the computed counter.
+// The same comparison correction adds37B gzip here; these are exact measured baselines.
+const computedGenerated = await generatedFixture("computed-counter", 9_066);
 // These compiled through the general runtime (~39 KB) until every component compiled directly.
-const keyedGenerated = await generatedFixture("keyed-list", 8_314);
+// Removing loop metadata leaves this fixture at 20,798 B; minifier allocation shifts gzip by 2 B on Node 24.
+const keyedGenerated = await generatedFixture("keyed-list", 8_764);
 // +5 B: a root renders, at its first connection, what changed after its construction while it waited
 // detached, such as a parent's bound list of objects; until then such a change never rendered.
 // +12 B: `host.on` relays a late responder to the requests that went unanswered, a guarded call that
 // does nothing until a component on the page asks.
-const dataGenerated = await generatedFixture("data-read", 8_275);
-const controllerGenerated = await generatedFixture("controller-lifecycle", 8_082);
+const dataGenerated = await generatedFixture("data-read", 8_635);
+const controllerGenerated = await generatedFixture("controller-lifecycle", 8_621);
 // The controller fixture plus one request: the request steps, `host.request` and `host.on`'s
 // responder filter (requests.ts, ~1 KB gzip), and checks written for its declared detail and answer.
 // +600 B: `host.hasResponder`, and `RequestEvent`'s static `respond`, `request` and `hasResponder`,
 // which ship with the class every request dispatches.
-const requestGenerated = await generatedFixture("controller-request", 9_784);
+const requestGenerated = await generatedFixture("controller-request", 10_322);
 // Head declarations, each fixture the one before plus a feature: a page with a bound prop and no head
 // declarations; a title and two metas (+2.1 KB: the head manager's keys, precedence, set-aside and
 // restore, JSON-LD blocks per instance and declaration, and one reconciliation per update); bound
 // JSON-LD (+0.15 KB, its serialization); a lazy declared script (+2.0 KB: the script entries, status,
 // `on:load` and lazy loading).
-const headNoneGenerated = await generatedFixture("head-none", 12_499);
+const headNoneGenerated = await generatedFixture("head-none", 12_957);
 // +78–79 B gzip over the component-identity baseline: core DOM mutations and base-URL fallback
 // support Angular SSR; script preloads survive reconciliation.
 // +31–36 B gzip: alternate links keep distinct language identities even when their URLs agree.
 // Recursive-factory helper exports change minified identifier allocation by 2 B gzip.
 // These acyclic fixtures contain none of the nesting helpers.
-const headStaticGenerated = await generatedFixture("head-static", 14_739);
-const headJsonGenerated = await generatedFixture("head-json", 14_885);
-const headGenerated = await generatedFixture("head-script", 16_855);
+// Weak script ownership changes minified names beside static head output (-1 B gzip).
+const headStaticGenerated = await generatedFixture("head-static", 15_021);
+const headJsonGenerated = await generatedFixture("head-json", 15_161);
+// +106 B gzip for native weak subscriber ownership and collection cleanup. Other fixtures
+// contain none of that code; retained disconnected handles keep their normal status callbacks.
+const headGenerated = await generatedFixture("head-script", 17_207);
 // The benchmark shape on the direct path: no interpreter, parser or type system may reach it.
 // Ratcheted to the measurement after the indexed coordinator split (7,528 B) + 3%, then by 25 B
 // for the controller host's prop channel (`host.props` and prop writes) that every prop component
@@ -225,11 +246,12 @@ const headGenerated = await generatedFixture("head-script", 16_855);
 // node methods through which keyed lists also hold rows of several nodes, and 15 B for the reconcile
 // recording the rows it kept in place, so lists whose rows read their position visit only moved rows,
 // 85 B for the platform-object check that keeps DOM nodes in state unwrapped, and 17 B for the
-// whitespace between its elements, which templates keep as authored.
-const controllerKeyedGenerated = await generatedFixture("controller-keyed", 8_894);
+// whitespace between its elements, which templates keep as authored. Typed loop aliases add
+// 200 B for their field checks and invalid-result retention, including one-time diagnostics.
+const controllerKeyedGenerated = await generatedFixture("controller-keyed", 9_444);
 const browserResult = await bundle({ entryPoints: [browserLoaderPath] });
 const browserInputs = Object.keys(browserResult.metafile?.inputs ?? {}).map(inputPath);
-const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, awaitGenerated, seededGenerated, computedGenerated, controllerKeyedGenerated, requestGenerated, headNoneGenerated, headStaticGenerated, headJsonGenerated, headGenerated];
+const generatedTargets = [staticGenerated, reactiveGenerated, propGenerated, awaitGenerated, seededGenerated, computedGenerated, keyedGenerated, dataGenerated, controllerGenerated, controllerKeyedGenerated, requestGenerated, headNoneGenerated, headStaticGenerated, headJsonGenerated, headGenerated];
 const browserParse5Modules = browserInputs.filter((path) => path.includes("/parse5/")).length;
 const browserDomInventoryModules = browserInputs.filter(
   (path) => path.includes("/generated/dom-properties"),

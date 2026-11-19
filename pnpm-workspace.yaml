@@ -32,7 +32,7 @@ catalog:
   magic-string: 0.30.21
   mobx: 7.0.6
   oxlint: 1.87.0
-  parse5: 8.0.1
+  parse5: 8.1.0
   postcss: 8.5.30
   playwright: 1.64.0
   pota: 0.22.235

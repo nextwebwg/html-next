@@ -80,6 +80,14 @@ describe("checkHtmlNext", () => {
     assert.deepEqual(diagnostics.map(({ code, line }) => [code, line]), [["HN001", 2], ["HN001", 3]]);
   });
 
+  it("collects independent stylesheet diagnostics with their component sources", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "app.html"), '<template component="x-app"><main></main><style>:host(:state(missing)){color:red}</style></template>');
+    await writeFile(join(root, "other.html"), '<template component="x-other"><main></main><style>:host(:state(alsoMissing)){color:blue}</style></template>');
+    const diagnostics = await checkHtmlNext({ root, entries: ["app.html", "other.html"] });
+    assert.deepEqual(diagnostics.map(({ code, source }) => [code, source?.split("/").at(-1)]), [["HY001", "app.html"], ["HY001", "other.html"]]);
+  });
+
   it("accepts recursive invocation graphs whose depth is checked at runtime", async () => {
     const root = await fixture();
     await writeFile(join(root, "app.html"), '<link rel="component" href="./one.html"><link rel="component" href="./two.html"><template component="x-app"><main><x-one></x-one><x-two></x-two></main></template>');

@@ -51,7 +51,7 @@ function consumer(invocation: string, definition: ComponentDefinition): string {
     const component = node.tagName === definition.contract.tag;
     const tag = component ? angularHostTag(definition, new Map([[definition.contract.tag, definition]])) : node.tagName;
     const attributes = (node.attrs ?? []).map(attribute => {
-      const propName = component ? Object.keys(definition.contract.props).find(name => name.toLowerCase() === attribute.name) : undefined;
+      const propName = component ? Object.keys(definition.contract.props).find(name => name.replace(/[A-Z]/g, letter => letter.toLowerCase()) === attribute.name) : undefined;
       if (propName === undefined) return `${attribute.name}="${escape(attribute.value)}"`;
       const type = definition.contract.props[propName]!.type;
       const normalized = typeof type === "string" ? parseTypeExpression(type) : type;
@@ -64,7 +64,7 @@ function consumer(invocation: string, definition: ComponentDefinition): string {
       // The shared corpus deliberately exercises invalid runtime inputs. Angular's
       // template checker is bypassed only at those inputs, retaining their values.
       for (const [name, prop] of Object.entries(definition.contract.props)) {
-        if (prop.required && !(node.attrs ?? []).some(attribute => attribute.name === name.toLowerCase())) attributes.push(`[${name}]="$any(undefined)"`);
+        if (prop.required && !(node.attrs ?? []).some(attribute => attribute.name === name.replace(/[A-Z]/g, letter => letter.toLowerCase()))) attributes.push(`[${name}]="$any(undefined)"`);
       }
     }
     return `<${tag} ${attributes.join(" ")}>${(node.childNodes ?? []).map(render).join("")}${["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"].includes(tag) ? "" : `</${tag}>`}`;

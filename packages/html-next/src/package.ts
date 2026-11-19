@@ -4,13 +4,14 @@ import { pathToFileURL } from "node:url";
 
 import ts from "typescript-compiler";
 import { preparedModuleRevision } from "./module-preparation.js";
+import { attributeHelperArtifact } from "./targets/attribute-helper.js";
 
 import { generateComponent, GENERATOR_VERSION, importsVueHost, importsVueBindings, importsVueHtml, importsVueControl, importsVueProps, importsVueRequests, importsVueHead, headHelperArtifact, requestsHelperArtifact, vueHostArtifact, vueBindingsArtifact, vueHtmlArtifact, vueControlArtifact, vuePropsArtifact } from "./generate.js";
 import type { ComponentPackageConfig } from "./package-config.js";
 import { commonDirectory } from "./controller-files.js";
 import { writeHostFiles } from "./host-declarations.js";
 import { parseComponentResource } from "./source-graph.js";
-import type { ComponentDefinition } from "./template.js";
+import { definitionMayInvokeComponents, type ComponentDefinition } from "./template.js";
 
 export interface AssembledPackage {
   readonly components: readonly string[];
@@ -196,6 +197,10 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
   }
   // Every definition is read first, so each component's invocations are typed by the contracts it invokes.
   const byTag = new Map(definitions.map((definition) => [definition.contract.tag, definition] as const));
+  // Vanilla emits sibling imports only for factories its template actually calls.
+  const invocations = new Map(definitions.map(definition => [definition.contract.tag, {
+    module: `./${definition.contract.name}.js`, definition,
+  }] as const));
   if (config.hostTypes === true) {
     await writeHostFiles(sourceDefinitions, new Map(sourceDefinitions.map(({ definition }) => [definition.contract.tag, definition] as const)));
   }
@@ -203,7 +208,8 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     const controller = controllers.get(definition.contract.tag);
     const modulePreparation = controller === undefined || definition.module === undefined ? undefined
       : await preparedModuleRevision(controller, definition, config.version, path => readFile(moduleSources.get(path)!, "utf8"));
-    for (const artifact of generateComponent(generatedDefinition(definition, controller), { definitions: byTag,
+    for (const artifact of generateComponent(generatedDefinition(definition, controller), { definitions: byTag, invocations,
+      guardNestedDepth: definitionMayInvokeComponents(definition),
       ...(modulePreparation === undefined ? {} : { modulePreparation }) })) {
       if (files.has(artifact.path)) throw new Error(`Package artifact collision at ${artifact.path}.`);
       files.set(artifact.path, artifact.content);
@@ -248,6 +254,11 @@ export async function assembleComponentPackage(config: ComponentPackageConfig): 
     const props = vuePropsArtifact();
     if (files.has(props.path)) throw new Error(`Package artifact collision at ${props.path}.`);
     files.set(props.path, props.content);
+  }
+  if ([...files].some(([path, content]) => path.startsWith("vue/") && typeof content === "string" && /\bfrom\s+["']\.\/attributes["']/.test(content))) {
+    const attributes = attributeHelperArtifact("vue", GENERATOR_VERSION);
+    if (files.has(attributes.path)) throw new Error(`Package artifact collision at ${attributes.path}.`);
+    files.set(attributes.path, attributes.content);
   }
   if ([...files.values()].some((content) => typeof content === "string" && importsVueRequests(content))) {
     const requests = requestsHelperArtifact("vue");

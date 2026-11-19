@@ -7,7 +7,7 @@ import { getDomInterface } from "../platform.js";
 import { iteratedRefNames, rootArms, type ComponentDefinition, type TemplateNode } from "../template.js";
 import { declarationTypeNode, normalizeType, parseTypeExpression, typeScriptType } from "../type-system.js";
 import { targetComponent } from "./backend.js";
-import { propKey, propTypeSource } from "./shared.js";
+import { propKey, propValueTypeSource } from "./shared.js";
 import { present, typeOf, typeScript, UNKNOWN, type Static } from "./vue-lowering.js";
 
 const PRELUDE = `/** A prop's accepted value, its latest direct input, and that input's validity. */
@@ -175,8 +175,7 @@ export function generateHostDeclaration(
   const declarations = definition.declarations ?? [];
 
   const props = target.props.map(({ name, contract: prop }) => {
-    const defaulted = prop.default !== undefined && prop.default !== null;
-    const type = defaulted && !prop.required ? propTypeSource({ ...prop, required: true }) : propTypeSource(prop);
+    const type = propValueTypeSource(prop);
     return `readonly ${propKey(name)}: HostProp<${type}>`;
   });
   const writableStates = declarations.flatMap((declaration) => declaration.kind === "state" ? [declaration.name] : []);

@@ -135,7 +135,7 @@ class FrameworkCompiler {
     const names = new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.peerDependencies ?? {})]);
     // Feature-specific server helpers are supplied by the adapter without an extra app install.
     names.add("parse5");
-    if (this.options.target === "svelte") { names.add("cssstyle"); names.add("css-tree"); }
+    names.add("cssstyle"); names.add("css-tree");
     for (const name of names) {
       const target = ["parse5", "cssstyle", "css-tree"].includes(name) ? await packageDirectory(dirname(require.resolve(name)), name)
         : await packageDirectory(packageRoot, name);

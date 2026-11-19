@@ -4,6 +4,9 @@ import type { Browser, BrowserType, Page } from "playwright";
 
 /** Use one text raster path for both pages in Chromium's cross-page pixel comparisons. */
 export function launchParityBrowser(browserType: BrowserType): Promise<Browser> {
+  if (browserType.name() === "firefox" && process.env.HTMLNEXT_FIREFOX_ENDPOINT !== undefined) {
+    return browserType.connect(process.env.HTMLNEXT_FIREFOX_ENDPOINT, { exposeNetwork: "<loopback>" });
+  }
   // Partial raster can retain one-channel rounding differences at native control corners after edits.
   // Full raster preserves exact cross-page pixel checks without changing the controls or their styles.
   // https://chromium.googlesource.com/chromium/src/+/aa63f203aea2ed4b43e4bfc18a04905813df56d8/content/public/common/content_switches.cc

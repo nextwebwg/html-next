@@ -10,6 +10,7 @@ import { describe, it } from "vitest";
 import { JSDOM } from "jsdom";
 
 import { renderedInstanceRecord } from "../src/rendered-form.js";
+import { checkedReferenceInitial, checkedReferenceSource } from "./checked-reference-fixture.js";
 import { parseComponent } from "../src/source-parser.js";
 import { closeRenderWorkers, createRenderer, renderComponents, setRenderWorkers, type RenderedComponents } from "../src/server.js";
 
@@ -17,13 +18,118 @@ const counter = parseComponent(`<template component="x-server-counter"><defs>
   <prop name="label" type="string" default="Counter">Label.</prop>
   <state name="count" type="number" value="0"></state>
   <handler name="increment"><set name="count" expr:value="$count + 1"></set></handler>
-</defs><section><h2 $value="$label"></h2><button type="button" on:click="increment"><span $value="$count"></span></button>
+</defs><section $attributes><h2 $value="$label"></h2><button type="button" on:click="increment"><span $value="$count"></span></button>
   <slot></slot></section><style>:host { display: block; }</style></template>`);
 
 describe("Node component rendering", () => {
+  it("omits authored comments from rendered content and slot fallbacks", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const supplied of [false, true]) {
+        const definitions = [
+          parseComponent('<template component="x-card"><article>Before<!-- authored-note -->After<slot>Fall<!-- fallback-note -->back</slot></article></template>'),
+          parseComponent(`<template component="x-parent"><main><x-card>${supplied ? "Given<!-- projected-note -->Text" : ""}</x-card></main></template>`),
+        ];
+        const { html } = await renderer.render('<x-parent></x-parent>', { definitions });
+        const dom = new JSDOM(html);
+        try {
+          assert.ok(!html.includes("-note"));
+          assert.equal(dom.window.document.querySelector("article")!.textContent, "BeforeAfter" + (supplied ? "GivenText" : "Fallback"));
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("records parent-bound props as caller-provided rather than module-produced", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const expression of ["$name", "$draft", "null"]) {
+        const definitions = [
+          parseComponent('<template component="x-card"><defs><prop name="title" type="string" default="Default">Title.</prop></defs><article><input from:value="$title"></article></template>'),
+          parseComponent(`<template component="x-parent"><defs><prop name="name" type="string" default="Provided">Name.</prop><state name="draft" type="string" from="$name"></state></defs><main><x-card from:title="${expression}"></x-card></main></template>`),
+        ];
+        const { html } = await renderer.render('<x-parent></x-parent>', { definitions });
+        const dom = new JSDOM(html);
+        try {
+          const record = renderedInstanceRecord(dom.window.document.querySelector("article")!, "x-card")!;
+          assert.equal(record.props.title, expression === "null" ? "Default" : "Provided");
+          assert.equal(record.inputs.title!.provided, true);
+          assert.equal(record.inputs.title!.producer ?? false, false);
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("discovers a large registered component catalog without a combined selector limit", async () => {
+    const definitions = Array.from({ length: 60 }, (_, index) => {
+      const tag = `x-long-component-name-for-discovery-${index}`;
+      return parseComponent(`<template component="${tag}"><b>Item ${index}</b></template>`);
+    });
+    const { html } = await renderComponents('<x-long-component-name-for-discovery-59></x-long-component-name-for-discovery-59>', { definitions });
+    const dom = new JSDOM(html);
+    try { assert.equal(dom.window.document.querySelector('b')?.textContent, 'Item 59'); }
+    finally { dom.window.close(); }
+  });
+  it("keeps an explicit application root attribute on a delegated root", async () => {
+    const definitions = [parseComponent('<template component="x-outer-output"><defs><state name="count" type="integer" value="0"></state></defs><x-inner-output><output>{$count}</output></x-inner-output></template>'),
+      parseComponent('<template component="x-inner-output"><main><slot></slot></main></template>')];
+    const { html } = await renderComponents('<x-outer-output></x-outer-output>', {
+      definitions, rootAttributes: { 'x-outer-output': { 'data-app-layer': '0' } }, state: { '[data-app-layer="0"]': { count: 3 } },
+    });
+    const dom = new JSDOM(html);
+    try {
+      assert.equal(dom.window.document.querySelector('main')?.getAttribute('data-app-layer'), '0');
+      assert.deepEqual(dom.window.document.querySelector('main')?.getAttribute('component')?.split(/\s+/).sort(), ['x-inner-output', 'x-outer-output']);
+      assert.equal(dom.window.document.querySelector('output')?.textContent, '3');
+    } finally { dom.window.close(); }
+  });
+  it("writes application root attributes independently of invocation forwarding", async () => {
+    const definition = parseComponent('<template component="x-root-output" noforward><defs><state name="count" type="integer" value="0"></state></defs><main><b $attributes>Forwarded</b><output>{$count}</output></main></template>');
+    const { html } = await renderComponents('<x-root-output data-input="Caller"></x-root-output>', {
+      definitions: [definition], rootAttributes: { "x-root-output": { "data-app-layer": "0" } }, state: { '[data-app-layer="0"]': { count: 3 } },
+    });
+    const dom = new JSDOM(html);
+    try {
+      assert.equal(dom.window.document.querySelector("main")?.getAttribute("data-app-layer"), "0");
+      assert.equal(dom.window.document.querySelector("main")?.getAttribute("data-input"), null);
+      assert.equal(dom.window.document.querySelector("b")?.getAttribute("data-input"), "Caller");
+      assert.equal(dom.window.document.querySelector("b")?.getAttribute("data-app-layer"), null);
+      assert.equal(dom.window.document.querySelector("output")?.textContent, "3");
+    } finally { dom.window.close(); }
+  });
+
+  it("checks only evaluated typed references, including computed and quoted field keys", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      const result = await renderer.render('<x-checked-reads></x-checked-reads>', { definitions: [parseComponent(checkedReferenceSource)] });
+      const dom = new JSDOM(result.html);
+      try {
+        assert.deepEqual(Object.fromEntries(Object.keys(checkedReferenceInitial).map(id =>
+          [id, dom.window.document.getElementById(id)?.textContent])), checkedReferenceInitial);
+      } finally { dom.window.close(); }
+    } finally { await renderer.close(); }
+  });
+  it("checks typed loop aliases in their own lexical layer while preserving valid siblings", async () => {
+    const definition = parseComponent(`<template component="x-typed-aliases"><defs>
+      <state name="strings" type="list(object({ label: string, note: string }))" from="[{ label: 7, note: 'safe' }]"></state>
+      <state name="numbers" type="list(object({ label: number, note: string }))" from="[{ label: 7, note: 'safe' }]"></state>
+      <state name="untyped" type="unknown" from="[{ label: false, note: 'safe' }]"></state>
+      </defs><section>
+      <output id="strings"><b $each="row of $strings">[{$row.label}|{$row.note}]</b></output>
+      <output id="numbers"><b $each="row of $numbers">[{$row.label}|{$row.note}]</b></output>
+      <output id="untyped"><b $each="row of $untyped">[{$row.label}|{$row.note}]</b></output>
+      </section></template>`);
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      const result = await renderer.render('<x-typed-aliases></x-typed-aliases>', { definitions: [definition] });
+      const dom = new JSDOM(result.html);
+      try {
+        assert.deepEqual(["strings", "numbers", "untyped"].map(id => dom.window.document.getElementById(id)?.textContent),
+          ["[|safe]", "[7|safe]", "[false|safe]"]);
+      } finally { dom.window.close(); }
+    } finally { await renderer.close(); }
+  });
   it("addresses each component host by tag when definitions share a native root", async () => {
-    const owner = parseComponent('<template component="named-owner"><defs><state name="ownerText" type="string" value="Owner"></state></defs><named-leaf><span>{$ownerText}</span></named-leaf></template>');
-    const leaf = parseComponent('<template component="named-leaf"><defs><state name="leafText" type="string" value="Leaf"></state></defs><article><b>{$leafText}</b><slot></slot></article></template>');
+    const owner = parseComponent('<template component="named-owner"><defs><state name="ownerText" type="string" value="Owner"></state></defs><named-leaf $attributes><span>{$ownerText}</span></named-leaf></template>');
+    const leaf = parseComponent('<template component="named-leaf"><defs><state name="leafText" type="string" value="Leaf"></state></defs><article $attributes><b>{$leafText}</b><slot></slot></article></template>');
     const source = `export function prepare({ document, host }) {
       const root = document.querySelector('#subject');
       const owner = host(root, 'named-owner'); const leaf = host(root, 'named-leaf');
@@ -39,7 +145,7 @@ describe("Node component rendering", () => {
   const preparation = new URL("./fixtures/server-prepare.mjs", import.meta.url).href;
   const product = parseComponent(`<template component="x-prepared"><defs>
     <prop name="product" type="string">Product.</prop><state name="draft" type="string" from="$product"></state></defs>
-    <section><h1 $await="$product">{$product}</h1><p $else>Waiting.</p><output>{$draft}</output>
+    <section $attributes><h1 $await="$product">{$product}</h1><p $else>Waiting.</p><output>{$draft}</output>
     <x-server-counter $await="$product" from:label="$product"></x-server-counter></section></template>`);
   it("closes one renderer's active and queued work while another renderer completes its private read", async () => {
     const first = createRenderer({ workers: 1 }); const second = createRenderer({ workers: 1 });
@@ -243,7 +349,7 @@ describe("Node component rendering", () => {
     const definition = parseComponent(`<template component="x-initial-props"><defs>
       <prop name="label" type="string" default="Default">Label.</prop>
       <state name="draft" type="string" from="$label"></state></defs>
-      <article><h1>{$label}</h1><output>{$draft}</output></article></template>`);
+      <article $attributes><h1>{$label}</h1><output>{$draft}</output></article></template>`);
     const rendered = await renderComponents('<x-initial-props id="typed" label="HTML"></x-initial-props><x-initial-props id="null" label="HTML"></x-initial-props><x-initial-props id="released" label="HTML"></x-initial-props><x-initial-props id="implicit"></x-initial-props>', {
       definitions: [definition], props: { "#typed": { label: "Typed" }, "#null": { label: null }, "#released": { label: undefined } },
     });
@@ -261,6 +367,114 @@ describe("Node component rendering", () => {
     await assert.rejects(renderComponents('<x-initial-props></x-initial-props>', { definitions: [definition], props: { "#missing": { label: "No" } } }), /matches no component/);
     await assert.rejects(renderComponents('<div id="plain"></div>', { definitions: [definition], props: { "#plain": { label: "No" } } }), /does not identify a component/);
     await assert.rejects(renderComponents('<x-initial-props id="wrong"></x-initial-props>', { definitions: [definition], props: { "#wrong": { unknown: true } } }), /declares no prop/);
+  });
+  it("keeps receiving defaults ready when an available object has no bound member", async () => {
+    const definitions = [parseComponent(`<template component="x-default-child"><defs>
+      <prop name="title" type="string" default="Fallback">Title.</prop>
+      <state name="draft" type="string" from="$title"></state>
+      <computed name="blank" from="$title = ''"></computed>
+      </defs><article from:aria-hidden="$blank"><output>{$draft}</output></article></template>`),
+    parseComponent(`<template component="x-default-parent"><defs><prop name="data" type="object" open>Data.</prop></defs>
+      <main><x-default-child from:title="$data.title"></x-default-child></main></template>`)];
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const [data, expected] of [[{}, "Fallback"], [{ title: null }, "Fallback"],
+        [{ title: "" }, ""], [{ title: "Provided" }, "Provided"]] as const) {
+        const { html } = await renderer.render('<x-default-parent></x-default-parent>', {
+          definitions, props: { "x-default-parent": { data } },
+        });
+        const dom = new JSDOM(html);
+        try {
+          const root = dom.window.document.querySelector("article")!;
+          assert.equal(root.querySelector("output")!.textContent, expected);
+          assert.equal(root.getAttribute("aria-hidden"), String(expected.length === 0));
+          const record = renderedInstanceRecord(root, "x-default-child")!;
+          assert.deepEqual(record.initialized, ["draft"]);
+          assert.equal(record.availability?.title?.ready ?? true, true);
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("records explicit prop metadata without turning omitted or null defaults into inputs", async () => {
+    const definitions = [parseComponent(`<template component="x-reflect"><defs>
+      <prop name="count" type="integer" default="5">Count.</prop><prop name="pageSize" type="integer" default="10">Size.</prop>
+      <prop name="enabled" type="boolean" default="true">Enabled.</prop><prop name="rows" type="list(string)" default="[]">Rows.</prop>
+      </defs><article><output>{$count}:{$pageSize}:{$enabled}:{$rows.length}</output></article></template>`),
+    parseComponent('<template component="x-wrap"><defs><prop name="count" type="integer" default="5">Count.</prop></defs><x-reflect from:count="$count"></x-reflect></template>')];
+    const cases: Array<[string, Record<string, unknown>, Record<string, string>]> = [
+      ["x-reflect", {}, {}], ["x-reflect", { count: null }, {}],
+      ["x-reflect", { count: 7, pageSize: 12 }, { "data-x-reflect-prop-count": "7", "data-x-reflect-prop-page-size": "12" }],
+      ["x-reflect", { enabled: false }, { "data-x-reflect-prop-enabled": "false" }],
+      ["x-reflect", { rows: [] }, { "data-x-reflect-prop-rows": "[]" }],
+      ["x-reflect", { rows: ["A", "B"] }, { "data-x-reflect-prop-rows": '["A","B"]' }],
+      ["x-reflect", { count: "wrong" }, { "data-x-reflect-prop-count": "5" }],
+      ["x-wrap", {}, { "data-x-reflect-prop-count": "5" }],
+      ["x-wrap", { count: 9 }, { "data-x-wrap-prop-count": "9", "data-x-reflect-prop-count": "9" }],
+      ["x-wrap", { count: null }, { "data-x-reflect-prop-count": "5" }],
+    ];
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const [tag, inputs, expected] of cases) {
+        const { html } = await renderer.render(`<${tag}></${tag}>`, { definitions, props: { [tag]: inputs } });
+        const dom = new JSDOM(html);
+        try {
+          const root = dom.window.document.querySelector("article")!;
+          assert.deepEqual(Object.fromEntries([...root.attributes].filter(attribute => attribute.name.includes("-prop-")).map(attribute => [attribute.name, attribute.value])), expected);
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("preserves an initial textarea newline through the serialized HTML parser boundary", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const property of [false, true]) for (const value of ["\nLeading", "\r\nLeading"]) {
+        const definition = parseComponent(`<template component="x-area"><defs><prop name="value" type="string">Value.</prop></defs><textarea${property ? ' .value="$value"' : ""}>${property ? "Authored" : "{$value}"}</textarea></template>`);
+        const { html } = await renderer.render("<x-area></x-area>", { definitions: [definition], props: { "x-area": { value } } });
+        const dom = new JSDOM(html);
+        try {
+          const area = dom.window.document.querySelector("textarea")!;
+          assert.equal(area.value, "\nLeading");
+          if (property) assert.deepEqual(JSON.parse(area.getAttribute("data-html-next-form-defaults")!), { value: "Authored" });
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("serializes initial value properties with their authored reset defaults", async () => {
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      for (const [expression, expected] of [["'Live'", "Live"], ["null", ""], ["false", "false"], ["17", "17"], ["[]", ""], ["[1, 2]", "1,2"], ["{}", "[object Object]"]]) {
+        const definition = parseComponent(`<template component="x-field"><input value="Base" .value="${expression}"></template>`);
+        const { html } = await renderer.render("<x-field></x-field>", { definitions: [definition] });
+        const dom = new JSDOM(html);
+        try {
+          const input = dom.window.document.querySelector("input")!;
+          assert.equal(input.value, expected);
+          assert.deepEqual(JSON.parse(input.getAttribute("data-html-next-form-defaults")!), { value: "Base", valuePresent: true });
+        } finally { dom.window.close(); }
+      }
+    } finally { await renderer.close(); }
+  });
+  it("serializes checked properties separately from authored form reset defaults", async () => {
+    const cases = [["true", false, true], ["false", false, false], ["true", true, true], ["false", true, false],
+      ["null", true, false], ["''", true, false], ["0", true, false], ["'false'", false, true],
+      ["[]", false, true], ["{}", false, true], ["1 / 0", true, true], ["1 / 0", false, false]] as const;
+    const definition = parseComponent(`<template component="x-checked-properties"><form>${cases.map(([expression, authored], index) =>
+      `<input id="case-${index}" type="checkbox" value="control"${authored ? ' checked="authored"' : ''} .checked="${expression}">`).join("")}</form></template>`);
+    const renderer = createRenderer({ workers: 1 });
+    try {
+      const { html } = await renderer.render('<x-checked-properties></x-checked-properties>', { definitions: [definition] });
+      const dom = new JSDOM(html);
+      try {
+        cases.forEach(([, authored, expected], index) => {
+          const input = dom.window.document.querySelector<HTMLInputElement>(`#case-${index}`)!;
+          assert.equal(input.hasAttribute(".checked"), false);
+          assert.equal(input.checked, expected);
+          const defaults = input.getAttribute("data-html-next-form-defaults");
+          if (authored !== expected) assert.equal(JSON.parse(defaults!).checked, authored);
+          else assert.equal(defaults, null);
+        });
+      } finally { dom.window.close(); }
+    } finally { await renderer.close(); }
   });
   it("renders braced inline expressions as escaped text in mixed content and native table rows", async () => {
     const definition = parseComponent(String.raw`<template component="x-inline"><defs>
@@ -291,12 +505,12 @@ describe("Node component rendering", () => {
   it("records explicit props under the component's tag, leaving authored data-* attributes as written", async () => {
     const definition = parseComponent(`<template component="x-figure"><defs>
       <prop name="placement" type="keyword" values="start, end" default="start">Where the figure floats.</prop>
-      </defs><figure data-placement="figure"><slot></slot></figure></template>`);
+      </defs><figure data-placement="figure" $attributes><slot></slot></figure></template>`);
     const rendered = await renderComponents('<x-figure placement="end"></x-figure><x-figure placement="end" data-placement="wide"></x-figure>',
       { definitions: [definition] });
     const roots = [...rendered.html.matchAll(/<figure[^>]*>/g)].map(([tag]) => tag);
     assert.equal(roots.length, 2);
-    // The template's own data-placement and a consumer's pass-through keep their values; the prop has its own attribute.
+    // The explicit marker follows the literal; the prop has its own reflected attribute.
     assert.match(roots[0]!, /\sdata-placement="figure"/);
     assert.match(roots[1]!, /\sdata-placement="wide"/);
     for (const root of roots) assert.match(root, /\sdata-x-figure-prop-placement="end"/);
@@ -334,7 +548,7 @@ describe("Node component rendering", () => {
   // Conflicting requests: one tag, two definitions, each with its own state and URL.
   const conflicting = (count: number) => renderComponents('<x-server-counter id="counter" label="Visits"></x-server-counter>', {
     definitions: [count % 2 === 0 ? counter : { ...counter, css: ":host { display: inline; }",
-      template: { ...counter.template, attributes: [{ kind: "literal", name: "title", value: "odd" }] } } as typeof counter],
+      template: { ...counter.template, attributes: [{ kind: "forward", name: "attributes" }, { kind: "literal", name: "title", value: "odd" }] } } as typeof counter],
     state: { "#counter": { count } },
     url: `https://example.test/${count}/`,
   });

@@ -1,0 +1,89 @@
+{
+  "recordedAt": "2026-11-08T22:24:14.547003+00:00",
+  "base": "87ed9c3d",
+  "scope": "Native declaration placement and typed text ordering. Incremental work in the unfinished C# renderer objective.",
+  "sourceHashes": {
+    "CHANGELOG.md": "9e3cb662f733d428cf3089297f7a350bd024b99bc91859210598161746bab0c1",
+    "packages/html-next-dotnet/README.md": "b4dd08599c81e3deebf25575d2859e6a192134fb1fab65e6fb0c318eaac90a1e",
+    "packages/html-next-dotnet/src/HtmlNext/ExpressionCompiler.cs": "726bd22fcf088f6b83e57b02153943755ab304204aeb344626904a606db1a944",
+    "packages/html-next-dotnet/src/HtmlNext/Expressions.cs": "c98d127379c06ea3ac5a205068bd33423328280cfbcc790398143e871e48e400",
+    "packages/html-next-dotnet/src/HtmlNext/HtmlNextCompiler.cs": "18ce0fa65b6017f6d281f09bc6433f69ff79859412657767f0e90c5e9d1adac1",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/ExpressionTests.cs": "5df387961e9c78e83905ed42ab6fc9cc2d46ac26975d3e6aceec793d936a657a",
+    "packages/html-next-dotnet/tests/HtmlNext.Tests/RenderingTests.cs": "b3cbf275922c5b7bce3598dfb120671d5d6b91c0026cb2fc0020c43a4c31cd4e"
+  },
+  "implementation": {
+    "declarations": "Find the direct defs region independently of markup position, then remove that exact declaration node before checking the single markup root. Existing duplicate-region rejection remains.",
+    "orderedText": "Accept compatible string/keyword operands and compare with native string.CompareOrdinal. Preserve numeric comparisons, invalid/absent propagation and compile-time rejection of statically disjoint operands.",
+    "platform": "Existing native DOM and ordinal UTF-16 comparison. No new dependency or browser runtime layer."
+  },
+  "proofs": {
+    "declarationPlacement": {
+      "before": {
+        "passed": 1,
+        "failed": 1
+      },
+      "coverage": "Default and supplied prop values flow through a computed declaration with defs before or after the markup root."
+    },
+    "orderedText": {
+      "before": {
+        "passed": 0,
+        "failed": 9
+      },
+      "coverage": "All ordered operators, equality boundaries, ISO month limits, numeric-looking strings, case and surrogate-pair ordering, current inputs, null and statically disjoint numeric/text operands."
+    },
+    "native": {
+      "passed": 983,
+      "skipped": 0
+    }
+  },
+  "catalogCharacterization": {
+    "entries": 111,
+    "compiled": 83,
+    "failed": 28,
+    "failureCategories": {
+      "formatting": 8,
+      "keyed styles": 19,
+      "entry dependency context": 1
+    },
+    "meaning": "Per-entry compilation with declared source dependencies. This is not full catalog rendering or behavior qualification.",
+    "resolvedFirstFailures": [
+      "Column now reaches its keyed style rather than rejecting declaration placement.",
+      "Calendar and its picker consumers now reach format calls rather than rejecting text comparisons."
+    ],
+    "dependencyLimit": "The standalone Data Table entry needs its accepted Column definition in the compilation graph. Its unknown-component failure is an audit-context limitation until reproduced with that definition supplied."
+  },
+  "review": {
+    "mode": "One bounded inline correctness and simplification pass, current session model. No agents or cross-model review.",
+    "activeFindings": 0,
+    "simplificationEdits": 0
+  },
+  "repositoryGate": {
+    "command": "corepack pnpm verify:pr",
+    "exitCode": 0,
+    "javascript": {
+      "passed": 2137,
+      "explicitlyGatedSkips": 5029,
+      "seconds": 435.79
+    },
+    "native": {
+      "passed": 983,
+      "skipped": 0
+    },
+    "fullFluidOutputValidations": 5,
+    "nativeClient": {
+      "passed": 11,
+      "browserGatedSkips": 15,
+      "seconds": 7.77
+    },
+    "packedChecks": {
+      "passed": 8,
+      "seconds": 97.64
+    }
+  },
+  "limits": [
+    "Keyed styles and Intl formatting remain unfinished.",
+    "Complete native application, forms, hydration and catalog behavior qualification remain unfinished.",
+    "Full matched latency, throughput, retained/peak memory and serving qualification remain unfinished.",
+    "Native package remains private and unpublished."
+  ]
+}

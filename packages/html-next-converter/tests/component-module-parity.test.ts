@@ -32,7 +32,7 @@ const files: Readonly<Record<string, string>> = {
   export const { connect } = bindModule({ create() { window.factories += 1; return { connect: browserConnect }; } });`,
 };
 const enabled = process.env.HTMLNEXT_TARGET_TEST === "1";
-const nodeModules = fileURLToPath(new URL("../../html-next/node_modules", import.meta.url));
+const nodeModules = fileURLToPath(new URL("../node_modules", import.meta.url));
 const htmlNextSource = fileURLToPath(new URL("../../html-next/src/", import.meta.url));
 const bindingAlias = { "@nextwebwg/html-next/bindings": join(htmlNextSource, "bindings.ts") };
 const vuePlugin = { name: "compiled-vue-sfc", setup(pluginBuild: { onResolve: (options: { filter: RegExp }, callback: (args: { path: string; resolveDir: string }) => { path: string }) => void }) {

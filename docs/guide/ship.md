@@ -3,6 +3,7 @@ title: Publish a library
 order: 3
 blurb: publish your HTML · let apps choose their framework
 eyebrow: HTML Next · Libraries
+navGroup: vite
 ---
 
 # Publish your HTML Next library
