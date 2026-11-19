@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   selection:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 1
     outputs:
       corpus: ${{ steps.plan.outputs.corpus }}
@@ -31,7 +31,7 @@ jobs:
   corpus:
     name: ${{ matrix.name }}
     needs: selection
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.selection.outputs.playwright }}-noble
       options: --user 1001 --ipc=host --init

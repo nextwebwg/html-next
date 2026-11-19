@@ -19,7 +19,7 @@ concurrency:
 jobs:
   changes:
     name: Detect runtime and compiler changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     outputs:
       base: ${{ steps.diff.outputs.base }}
       runtime: ${{ steps.diff.outputs.runtime }}
@@ -44,7 +44,7 @@ jobs:
     name: Framework rendering against the previous day
     needs: changes
     if: needs.changes.outputs.runtime == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     # Up to three sweeps of four entries (Vite-compiled and live, candidate and base; an estimated 18
     # minutes each on an M4 Pro, twice the measured 9-minute two-entry sweep) plus a cold setup, at up
     # to 2.5x on hosted runners; tighten this from the first runs' per-sweep timing.
