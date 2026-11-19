@@ -71,11 +71,15 @@ it.skipIf(process.platform === "win32")("resolves a successful tested merge rece
   const git = (...args: string[]) => execFileSync("git", args, { cwd: directory, encoding: "utf8", stdio: "pipe" }).trim();
   try {
     for (const name of ["scripts", ".github/workflows", "packages/example", "bin"]) mkdirSync(join(directory, name), { recursive: true });
-    for (const name of ["ci-reuse.ts", "ci-browser-environment.json"]) writeFileSync(join(directory, "scripts", name),
-      readFileSync(new URL(`../scripts/${name}`, import.meta.url)));
+    const browserVersion = "1.64.0";
+    writeFileSync(join(directory, "scripts/ci-reuse.ts"), readFileSync(new URL("../scripts/ci-reuse.ts", import.meta.url)));
+    writeFileSync(join(directory, "scripts/ci-browser-environment.json"), JSON.stringify({
+      image: `mcr.microsoft.com/playwright:v${browserVersion}-noble@sha256:${"a".repeat(64)}`,
+      node: "24.15.0",
+    }));
     writeFileSync(join(directory, "scripts/ci-plan.ts"), "// receipt authority\n");
     writeFileSync(join(directory, ".github/workflows/ci.yml"), "name: CI\n");
-    writeFileSync(join(directory, "pnpm-lock.yaml"), "playwright:\n  specifier: 1.64.0\n  version: 1.64.0\n");
+    writeFileSync(join(directory, "pnpm-lock.yaml"), `playwright:\n  specifier: ${browserVersion}\n  version: ${browserVersion}\n`);
     writeFileSync(join(directory, "packages/example/source.ts"), "original");
     writeFileSync(join(directory, "CHANGELOG.md"), "original prose");
     git("init", "--quiet"); git("config", "user.name", "CI"); git("config", "user.email", "ci@example.test");
