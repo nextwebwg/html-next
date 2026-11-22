@@ -296,8 +296,8 @@ importers:
         specifier: 21.2.24
         version: 21.2.24
       '@angular/compiler-cli':
-        specifier: 21.2.24
-        version: 21.2.24(@angular/compiler@21.2.24)(typescript@5.9.3)
+        specifier: 22.2.3
+        version: 22.2.3(@angular/compiler@21.2.24)(typescript@5.9.3)
       '@angular/core':
         specifier: 21.2.24
         version: 21.2.24(@angular/compiler@21.2.24)(rxjs@7.8.2)
@@ -411,8 +411,8 @@ importers:
         specifier: 21.2.24
         version: 21.2.24
       '@angular/compiler-cli':
-        specifier: 21.2.24
-        version: 21.2.24(@angular/compiler@21.2.24)(typescript@5.9.3)
+        specifier: 22.2.3
+        version: 22.2.3(@angular/compiler@21.2.24)(typescript@5.9.3)
       '@angular/core':
         specifier: 21.2.24
         version: 21.2.24(@angular/compiler@21.2.24)(rxjs@7.8.2)
@@ -492,13 +492,13 @@ packages:
       '@angular/core': 21.2.24
       rxjs: ^6.5.3 || ^7.4.0
 
-  '@angular/compiler-cli@21.2.24':
-    resolution: {integrity: sha512-oUk8IgWG5NXH3ZyqzRPxs9ylfe6K0p+mP89y023+/AF4A1Fse3V+tfjRxvq5gnlSyJm3yRl74W5SwsCi1kxxxA==}
-    engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+  '@angular/compiler-cli@22.2.3':
+    resolution: {integrity: sha512-em7Ht0Dv7cN7vZgvl2fl1yscAs+zUG2Vr2YKpVZ/rOWuTL2JZyT1qIfKhC4wQoo/3lN8fiUIwQMpflSGzIEPng==}
+    engines: {node: ^22.22.3 || ^24.15.0 || >=26.0.0}
     hasBin: true
     peerDependencies:
-      '@angular/compiler': 21.2.24
-      typescript: '>=5.9 <6.1'
+      '@angular/compiler': 22.2.3
+      typescript: '>=6.0 <6.1'
     peerDependenciesMeta:
       typescript:
         optional: true
@@ -585,6 +585,10 @@ packages:
   '@babel/core@7.29.7':
     resolution: {integrity: sha512-RgHBCvtjbOK2gXSNBNIkNoEc9qoVEtau3hj8gEqKQuL3HZAibKarWFEI3Lfm6EYKkLalOh8eSrj9b+ch9H/VBA==}
     engines: {node: '>=6.9.0'}
+
+  '@babel/core@8.0.1':
+    resolution: {integrity: sha512-5FgxM4dLQpMJHSiVATk8foW263dVHQHBVpXYiimNECVWG01f4nFyEbQixeT6Mwvg7TayREJ2gpKl3o2RoMdnqw==}
+    engines: {node: ^22.18.0 || >=24.11.0}
 
   '@babel/core@8.0.6':
     resolution: {integrity: sha512-5zwYt1V4ji3mXKKRIAkohSJ29WepxNwxQi+7y7P5AcVPh1dcxnZBU2cfxHnPwS+u9+lZnXPsv30TQaF2xg+Tfg==}
@@ -2495,10 +2499,10 @@ snapshots:
       rxjs: 7.8.2
       tslib: 2.8.1
 
-  '@angular/compiler-cli@21.2.24(@angular/compiler@21.2.24)(typescript@5.9.3)':
+  '@angular/compiler-cli@22.2.3(@angular/compiler@21.2.24)(typescript@5.9.3)':
     dependencies:
       '@angular/compiler': 21.2.24
-      '@babel/core': 7.29.7
+      '@babel/core': 8.0.1
       '@jridgewell/sourcemap-codec': 1.6.0
       chokidar: 5.0.0
       convert-source-map: 1.9.0
@@ -2508,8 +2512,6 @@ snapshots:
       yargs: 18.2.0
     optionalDependencies:
       typescript: 5.9.3
-    transitivePeerDependencies:
-      - supports-color
 
   '@angular/compiler@21.2.24':
     dependencies:
@@ -2593,6 +2595,25 @@ snapshots:
       semver: 6.3.1
     transitivePeerDependencies:
       - supports-color
+
+  '@babel/core@8.0.1':
+    dependencies:
+      '@babel/code-frame': 8.0.6
+      '@babel/generator': 8.0.6
+      '@babel/helper-compilation-targets': 8.0.6
+      '@babel/helpers': 8.0.5
+      '@babel/parser': 8.0.6
+      '@babel/template': 8.0.0
+      '@babel/traverse': 8.0.6
+      '@babel/types': 8.0.6
+      '@types/gensync': 1.0.5
+      convert-source-map: 2.0.0
+      empathic: 2.1.0
+      gensync: 1.0.0-beta.2
+      import-meta-resolve: 4.2.0
+      json5: 2.2.3
+      obug: 2.2.1
+      semver: 7.8.5
 
   '@babel/core@8.0.6':
     dependencies:
