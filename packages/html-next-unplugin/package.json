@@ -42,7 +42,7 @@
     "vue-tsc": "catalog:"
   },
   "devDependencies": {
-    "@angular/common": "21.2.24",
+    "@angular/common": "22.2.3",
     "@angular/compiler": "21.2.24",
     "@angular/compiler-cli": "21.2.24",
     "@angular/core": "21.2.24",
