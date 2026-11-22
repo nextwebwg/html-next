@@ -46,7 +46,7 @@
     "@angular/compiler": "21.2.24",
     "@angular/compiler-cli": "21.2.24",
     "@angular/core": "21.2.24",
-    "@angular/platform-browser": "21.2.24",
+    "@angular/platform-browser": "22.2.3",
     "@angular/platform-server": "21.2.24",
     "@preact/preset-vite": "2.10.6",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
